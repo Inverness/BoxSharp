@@ -114,8 +114,7 @@ namespace BoxSharp
 
         private static string GetDeclarationId(Type type)
         {
-            // TODO Verify that this syntax is correct for nested types
-            return "T:" + type.FullName;
+            return "T:" + type.FullName.Replace("+", ".");
         }
     }
 }

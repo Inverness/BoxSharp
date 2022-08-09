@@ -114,7 +114,7 @@ namespace BoxSharp
 
         internal override async ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func)
         {
-            RuntimeGuard rg = RuntimeGuardInstances.GetFast(_gid.Gid);
+            RuntimeGuard rg = RuntimeGuardInstances.Get(_gid.Gid);
 
             BoxScript? oldCurrent = Current;
             Current = this;

@@ -8,52 +8,58 @@ namespace BoxSharp.Runtime.Internal
     public static class RuntimeGuardInterface
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void EnterMethod(int gid)
+        public static RuntimeGuard InitializeStaticField(int gid)
         {
-            RuntimeGuardInstances.GetFast(gid).GuardEnter();
+            return RuntimeGuardInstances.Get(gid);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void EnterStaticConstructor(int gid)
+        public static void EnterMethod(RuntimeGuard guard)
         {
-            RuntimeGuardInstances.GetFast(gid).GuardEnterStaticConstructor();
+            guard.GuardEnter();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void ExitStaticConstructor(int gid)
+        public static void EnterStaticConstructor(RuntimeGuard guard)
         {
-            RuntimeGuardInstances.GetFast(gid).GuardExitStaticConstructor();
+            guard.GuardEnterStaticConstructor();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T AfterNewObject<T>(int gid, T obj)
+        public static void ExitStaticConstructor(RuntimeGuard guard)
         {
-            RuntimeGuardInstances.GetFast(gid).GuardCount(1);
+            guard.GuardExitStaticConstructor();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static T AfterNewObject<T>(RuntimeGuard guard, T obj)
+        {
+            guard.GuardCount(1);
             return obj;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T[] AfterNewArray<T>(int gid, T[] arr)
+        public static T[] AfterNewArray<T>(RuntimeGuard guard, T[] arr)
         {
-            RuntimeGuardInstances.GetFast(gid).GuardCount(arr.Length);
+            guard.GuardCount(arr.Length);
             return arr;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void BeforeJump(int gid)
+        public static void BeforeJump(RuntimeGuard guard)
         {
-            RuntimeGuardInstances.GetFast(gid).GuardJump();
+            guard.GuardJump();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T BeforeAwait<T>(int _, T value)
+        public static T BeforeAwait<T>(RuntimeGuard _, T value)
         {
             // TODO
             return value;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T AfterAwait<T>(int _, T value)
+        public static T AfterAwait<T>(RuntimeGuard _, T value)
         {
             // TODO
             return value;

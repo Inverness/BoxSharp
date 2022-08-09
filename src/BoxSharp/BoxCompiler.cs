@@ -1,14 +1,13 @@
 ﻿using BoxSharp.Runtime.Internal;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Scripting;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace BoxSharp
@@ -23,7 +22,6 @@ namespace BoxSharp
         private static readonly Action<Script, Compilation> s_setScriptCompilation =
             ReflectionUtilities.MakeFieldSetter<Script, Compilation>("_lazyCompilation");
 
-        //private static int s_gidCounter;
         private readonly WhitelistSettings _whitelistSettings;
 
         private readonly RuntimeGuardSettings _runtimeGuardSettings;
@@ -54,9 +52,9 @@ namespace BoxSharp
             _scriptOptions = options;
         }
 
-        public async Task<ScriptCompileResult<T>> Compile<T>(string code)
+        public async Task<ScriptCompileResult<T>> Compile<T>(string code, Type? globalsType = null)
         {
-            Script<T> script = CSharpScript.Create<T>(code, _scriptOptions);
+            Script<T> script = CSharpScript.Create<T>(code, _scriptOptions, globalsType);
 
             Compilation compilation = script.GetCompilation();
 
@@ -74,7 +72,7 @@ namespace BoxSharp
 
                 foreach (ISymbol s in invalidSymbols)
                 {
-                    var err = "Symbol not allowed: " + s.ToDisplayString();
+                    var err = $"Symbol not allowed: {s.ToDisplayString()} ({DocumentationCommentId.CreateDeclarationId(s)})";
 
                     errors.Add(err);
                 }
@@ -82,26 +80,38 @@ namespace BoxSharp
 
             // If there were no invalid symbols, rewrite all syntax trees to include
             // calls to RuntimeGuardInterface.
-
             GidReservation? gid = null;
 
             if (errors.Count == 0)
             {
+                // Create a RuntimeGuard instance and return a GID (Guard ID) that can be used to retrieve it in generated code
+
                 gid = RuntimeGuardInstances.Allocate(_runtimeGuardSettings);
 
+                // Generate a class that will hold the static RuntimeGuard instance used in the rest of the code
+                // The field will be initialized using the previously allocated GID.
+
+                (SyntaxTree genSyntaxTree, string genClassName) = ScriptClassGenerator.Generate(gid.Gid);
+
+                var genRoot = (CompilationUnitSyntax) genSyntaxTree.GetRoot();
+
                 // TODO Consider using OperationWalker instead
-                var rewriter = new RuntimeGuardRewriter(gid.Gid, compilation);
+                var rewriter = new RuntimeGuardRewriter(gid.Gid, compilation.ScriptClass?.Name, genClassName, compilation);
 
-                foreach (SyntaxTree oldTree in compilation.SyntaxTrees.ToArray())
-                {
-                    SyntaxNode oldRoot = await oldTree.GetRootAsync();
+                // Scripts only have one syntax tree
+                SyntaxTree oldTree = compilation.SyntaxTrees.Single();
 
-                    SyntaxNode newRoot = rewriter.Rewrite(oldRoot);
+                var oldRoot = (CompilationUnitSyntax) await compilation.SyntaxTrees.First().GetRootAsync();
 
-                    SyntaxTree newTree = oldTree.WithRootAndOptions(newRoot, oldTree.Options);
+                var newRoot = (CompilationUnitSyntax) rewriter.Rewrite(oldRoot);
 
-                    compilation = compilation.ReplaceSyntaxTree(oldTree, newTree);
-                }
+                // Scripts cannot have additional syntax trees added to the compilation, so we'll need to insert
+                // generated code into the existing syntax tree.
+                CompilationUnitSyntax newRootWithGen = newRoot.WithMembers(newRoot.Members.InsertRange(0, genRoot.Members));
+
+                SyntaxTree newTree = oldTree.WithRootAndOptions(newRootWithGen, oldTree.Options);
+
+                compilation = compilation.ReplaceSyntaxTree(oldTree, newTree);
 
                 // No normal way to recreate a script with a new compilation, so will need to
                 // set the private field directly
@@ -114,7 +124,7 @@ namespace BoxSharp
             {
                 if (d.Severity == DiagnosticSeverity.Error)
                 {
-                    errors.Add(d.GetMessage());
+                    errors.Add(d.ToString());
                 }
             }
 

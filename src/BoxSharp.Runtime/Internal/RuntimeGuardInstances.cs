@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace BoxSharp.Runtime.Internal
@@ -18,22 +17,14 @@ namespace BoxSharp.Runtime.Internal
         private static int s_idCounter;
         private static readonly ConcurrentQueue<int> s_idQueue = new();
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static RuntimeGuard GetFast(int gid)
+        internal static RuntimeGuard Get(int gid)
         {
-            // TODO Consider generating a static field using RuntimeGuardRewriter that stores the instance
-            //
-            // Reading the instance without holding s_instanceLock is safe because s_instances is only replaced
-            // with a new array when growing in size, so reading either the new or old array will return
-            // the same RuntimeGuard instance as long as the GID is still in use.
-#if DEBUG
-            RuntimeGuard? rg = s_instances[gid];
-            if (rg == null)
-                ThrowInstanceNotFound();
-            return rg!;
-#else
-            return s_instances[gid]!;
-#endif
+            lock (s_instanceLock)
+            {
+                if (gid >= s_instances.Length || s_instances[gid] == null)
+                    throw new InvalidOperationException($"Invalid runtime guard ID: {gid}");
+                return s_instances[gid]!;
+            }
         }
 
         internal static GidReservation Allocate(IRuntimeGuardSettings settings)
@@ -46,7 +37,10 @@ namespace BoxSharp.Runtime.Internal
             var rg = new RuntimeGuard();
             rg.Initialize(settings);
 
-            SetValue(gid, rg);
+            lock (s_instanceLock)
+            {
+                s_instances[gid] = rg;
+            }
 
             return new GidReservation(gid, r => Free(r.Gid));
         }
@@ -55,7 +49,10 @@ namespace BoxSharp.Runtime.Internal
         {
             Debug.Assert(s_instances[gid] != null);
 
-            SetValue(gid, null);
+            lock (s_instanceLock)
+            {
+                s_instances[gid] = null;
+            }
 
             s_idQueue.Enqueue(gid);
         }
@@ -78,19 +75,6 @@ namespace BoxSharp.Runtime.Internal
             Debug.Assert(s_instances[gid] == null);
 
             return gid;
-        }
-
-        private static void SetValue(int gid, RuntimeGuard? value)
-        {
-            lock (s_instanceLock)
-            {
-                s_instances[gid] = value;
-            }
-        }
-
-        private static void ThrowInstanceNotFound()
-        {
-            throw new InvalidOperationException("Invalid RuntimeGuard ID");
         }
     }
 }

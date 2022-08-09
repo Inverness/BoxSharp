@@ -13,21 +13,24 @@ namespace BoxSharp
     internal class RuntimeGuardRewriter : CSharpSyntaxRewriter
     {
         private readonly int _gid;
+        private readonly string? _scriptClassName;
+        private readonly string _genClassName;
+        private readonly Compilation _compilation;
 
         private bool _handledFirstGlobal;
-
-        private readonly Compilation _compilation;
 
         private StatementSyntax? _enterMethodNode;
         private StatementSyntax? _enterStaticConstructorNode;
         private StatementSyntax? _exitStaticConstructorNode;
         private StatementSyntax? _beforeJumpNode;
 
-        public RuntimeGuardRewriter(int gid, Compilation compilation)
+        public RuntimeGuardRewriter(int gid, string? scriptClassName, string genClassName, Compilation compilation)
         {
             if (gid <= 0)
                 throw new ArgumentOutOfRangeException(nameof(gid));
             _gid = gid;
+            _scriptClassName = scriptClassName;
+            _genClassName = genClassName;
             _compilation = compilation;
         }
 
@@ -370,20 +373,42 @@ namespace BoxSharp
         //    return ExpressionStatement(MakeRuntimeGuardInvocation(methodName));
         //}
 
-        private static ExpressionStatementSyntax MakeRgInvocationStatement(string methodName, int gid)
+        private ExpressionStatementSyntax MakeRgInvocationStatement(string methodName, int _)
         {
             return ExpressionStatement(
                 MakeRgInvocationCore(methodName)
                 .WithArgumentList(
                     ArgumentList(
                         SingletonSeparatedList(
-                            Argument(
-                                LiteralExpression(
-                                    SyntaxKind.NumericLiteralExpression,
-                                    Literal(gid)))))));
+                            Argument(MakeRgAccess())))));
         }
 
-        private static InvocationExpressionSyntax MakeRgInvocation(
+        private MemberAccessExpressionSyntax MakeRgAccess()
+        {
+            if (_scriptClassName != null)
+            {
+                return MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    MemberAccessExpression(
+                        SyntaxKind.SimpleMemberAccessExpression,
+                        AliasQualifiedName(
+                            IdentifierName(Token(SyntaxKind.GlobalKeyword)),
+                            IdentifierName(_scriptClassName)),
+                        IdentifierName(_genClassName)),
+                    IdentifierName(ScriptClassGenerator.RuntimeGuardFieldName));
+            }
+            else
+            {
+                return MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    AliasQualifiedName(
+                        IdentifierName(Token(SyntaxKind.GlobalKeyword)),
+                        IdentifierName(_genClassName)),
+                    IdentifierName(ScriptClassGenerator.RuntimeGuardFieldName));
+            }
+        }
+
+        private InvocationExpressionSyntax MakeRgInvocation(
             string methodName,
             int gid,
             ExpressionSyntax genericArg)
@@ -393,7 +418,7 @@ namespace BoxSharp
                         ArgumentList(
                             SeparatedList<ArgumentSyntax>(
                                 NodeOrTokenList(
-                                    Argument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(gid))),
+                                    Argument(MakeRgAccess()),
                                     Token(SyntaxKind.CommaToken),
                                     Argument(genericArg)
                                     ))));

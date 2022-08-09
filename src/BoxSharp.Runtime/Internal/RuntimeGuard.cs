@@ -8,7 +8,7 @@ using System.Threading;
 namespace BoxSharp.Runtime.Internal
 {
     [EditorBrowsable(EditorBrowsableState.Never)]
-    internal sealed class RuntimeGuard
+    public sealed class RuntimeGuard
     {
         private bool _active;
 
@@ -26,12 +26,12 @@ namespace BoxSharp.Runtime.Internal
         [ThreadStatic] private static long t_staticConstructorStackBaseline;
         private HashSet<IDisposable>? _disposables;
 
-        public RuntimeGuard()
+        internal RuntimeGuard()
         {
             _stopwatch = new Stopwatch();
         }
 
-        public void GuardEnter()
+        internal void GuardEnter()
         {
             EnsureActive();
             EnsureStack();
@@ -39,7 +39,7 @@ namespace BoxSharp.Runtime.Internal
             //EnsureRate();
         }
 
-        public void GuardEnterStaticConstructor()
+        internal void GuardEnterStaticConstructor()
         {
             EnsureActive();
             t_staticConstructorStackBaseline = GetCurrentStackOffset();
@@ -47,19 +47,19 @@ namespace BoxSharp.Runtime.Internal
             //EnsureRate();
         }
 
-        public void GuardExitStaticConstructor()
+        internal void GuardExitStaticConstructor()
         {
             t_staticConstructorStackBaseline = 0;
         }
 
-        public void GuardJump()
+        internal void GuardJump()
         {
             EnsureActive();
             EnsureTime();
             //EnsureRate();
         }
 
-        public void GuardCount(long count)
+        internal void GuardCount(long count)
         {
             EnsureActive();
             EnsureTime();
@@ -78,7 +78,7 @@ namespace BoxSharp.Runtime.Internal
         //     }
         // }
 
-        public void CollectDisposable(IDisposable disposable)
+        internal void CollectDisposable(IDisposable disposable)
         {
             if (disposable == null)
                 return;
