@@ -211,7 +211,7 @@ namespace BoxSharp.Runtime.Internal
 
         private static void ThrowGuardException()
         {
-            throw new GuardException(GuardException.NoScopeMessage);
+            throw new GuardException("RuntimeGuard is not active. A script must be invoked using the BoxScript class.");
         }
 
         private static void ThrowRateGuardException()

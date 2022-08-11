@@ -7,8 +7,9 @@ using System.Runtime.Serialization;
 namespace BoxSharp.Runtime
 {
     [Serializable]
-    public class RateGuardException : GuardException {
+    public sealed class RateGuardException : GuardException
+    {
         internal RateGuardException() : base("Operation limit reached.") {}
-        protected RateGuardException(SerializationInfo info, StreamingContext context) : base(info, context) {}
+        public RateGuardException(SerializationInfo info, StreamingContext context) : base(info, context) {}
     }
 }

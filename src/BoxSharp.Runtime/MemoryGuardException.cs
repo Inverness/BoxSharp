@@ -7,8 +7,9 @@ using System.Runtime.Serialization;
 namespace BoxSharp.Runtime
 {
     [Serializable]
-    public class MemoryGuardException : GuardException {
+    public sealed class MemoryGuardException : GuardException
+    {
         internal MemoryGuardException() : base("Total allocation limit reached (collections and strings).") { }
-        protected MemoryGuardException(SerializationInfo info, StreamingContext context) : base(info, context) { }
+        public MemoryGuardException(SerializationInfo info, StreamingContext context) : base(info, context) { }
     }
 }
