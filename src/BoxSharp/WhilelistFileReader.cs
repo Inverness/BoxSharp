@@ -5,15 +5,18 @@ using System.Threading.Tasks;
 
 namespace BoxSharp
 {
-    internal static class WhilelistFileReader
+    /// <summary>
+    /// Reads whitelist files to produce a list of <see cref="WhitelistSymbol"/>
+    /// </summary>
+    public static class WhilelistFileReader
     {
-        public static async Task<List<WhitelistSymbol>> LoadAsync(string path)
+        public static async Task<IList<WhitelistSymbol>> LoadAsync(string path)
         {
             using FileStream stream = FileUtilities.OpenAsyncRead(path);
             return await LoadAsync(stream);
         }
 
-        public static async Task<List<WhitelistSymbol>> LoadAsync(Stream stream)
+        public static async Task<IList<WhitelistSymbol>> LoadAsync(Stream stream)
         {
             var list = new List<WhitelistSymbol>();
 

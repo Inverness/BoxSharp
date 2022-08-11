@@ -13,5 +13,15 @@ namespace BoxSharp
                                   bufferSize: 4096,
                                   useAsync: true);
         }
+
+        public static FileStream OpenAsyncWrite(string path)
+        {
+            return new FileStream(path,
+                                  FileMode.Create,
+                                  FileAccess.Write,
+                                  FileShare.None,
+                                  bufferSize: 4096,
+                                  useAsync: true);
+        }
     }
 }

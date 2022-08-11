@@ -104,7 +104,7 @@ namespace BoxSharp
 
         public async Task LoadSymbolFileAsync(Stream stream)
         {
-            List<WhitelistSymbol> entries = await WhilelistFileReader.LoadAsync(stream);
+            IList<WhitelistSymbol> entries = await WhilelistFileReader.LoadAsync(stream);
 
             foreach (WhitelistSymbol e in entries)
             {
