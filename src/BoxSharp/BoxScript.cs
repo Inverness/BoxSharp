@@ -22,6 +22,9 @@ namespace BoxSharp
         // the reference to it can be cleared if the script is disposed.
         private static readonly AsyncLocal<BoxScript?> s_current = new();
 
+        /// <summary>
+        /// Gets or sets the current script. This is saved using <see cref="AsyncLocal{T}"/>.
+        /// </summary>
         public static BoxScript? Current
         {
             get
@@ -32,6 +35,21 @@ namespace BoxSharp
             internal set
             {
                 s_current.Value = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets the current script. If there is no current script, throws an <see cref="InvalidOperationException"/.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">There is no current script.</exception>
+        public static BoxScript CurrentEnsured
+        {
+            get
+            {
+                BoxScript? current = s_current.Value;
+                if (current == null)
+                    throw new InvalidOperationException("No current script");
+                return current;
             }
         }
 

@@ -58,23 +58,28 @@ namespace BoxSharp
 
             Compilation compilation = script.GetCompilation();
 
-            var errors = new List<string>();
+            var diagnostics = new List<Diagnostic>();
+
+            bool hasErrors = false;
 
             // Analyze all syntax trees with the whitelist analyzer.
             // For each invalid symbol, an error message is added to the errors list.
 
             foreach (SyntaxTree tree in compilation.SyntaxTrees)
             {
-                IList<ISymbol> invalidSymbols = await _analyzer.AnalyzeAsync(compilation, tree);
+                IList<(ISymbol, Diagnostic)> invalidSymbols = await _analyzer.AnalyzeAsync(compilation, tree);
 
                 if (invalidSymbols.Count == 0)
                     continue;
 
-                foreach (ISymbol s in invalidSymbols)
+                foreach ((ISymbol s, Diagnostic d) in invalidSymbols)
                 {
-                    var err = $"Symbol not allowed: {s.ToDisplayString()} ({DocumentationCommentId.CreateDeclarationId(s)})";
+                    // All whitelist analyzer diagnostics are errors
+                    Debug.Assert(d.Severity == DiagnosticSeverity.Error);
 
-                    errors.Add(err);
+                    diagnostics.Add(d);
+
+                    hasErrors = true;
                 }
             }
 
@@ -82,7 +87,7 @@ namespace BoxSharp
             // calls to RuntimeGuardInterface.
             GidReservation? gid = null;
 
-            if (errors.Count == 0)
+            if (!hasErrors)
             {
                 // Create a RuntimeGuard instance and return a GID (Guard ID) that can be used to retrieve it in generated code
 
@@ -122,26 +127,28 @@ namespace BoxSharp
 
             foreach (Diagnostic d in script.Compile())
             {
+                diagnostics.Add(d);
+
                 if (d.Severity == DiagnosticSeverity.Error)
                 {
-                    errors.Add(d.ToString());
+                    hasErrors = true;
                 }
             }
 
-            CompileStatus status = errors.Count > 0 ? CompileStatus.Failed : CompileStatus.Success;
+            CompileStatus status = hasErrors ? CompileStatus.Failed : CompileStatus.Success;
 
             if (status == CompileStatus.Failed)
             {
                 gid?.Dispose();
 
-                return new ScriptCompileResult<T>(status, errors, null);
+                return new ScriptCompileResult<T>(status, diagnostics, null);
             }
 
             Debug.Assert(gid != null);
 
             var boxScript = new BoxScript<T>(gid!, script);
 
-            return new ScriptCompileResult<T>(status, null, boxScript);
+            return new ScriptCompileResult<T>(status, diagnostics, boxScript);
         }
 
         private class BoxMetadataReferenceResolver : MetadataReferenceResolver

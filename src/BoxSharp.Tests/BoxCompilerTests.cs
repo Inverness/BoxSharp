@@ -14,28 +14,23 @@ namespace BoxSharp.Tests
         }
 
         [Fact]
-        public async Task Compile_ValidSettings_Success()
+        public async Task Compile_AllowedSymbols_Success()
         {
+            //const string script = "for (int i = 0; i < 10; i++) {WriteLine($\"Loop {i}\"); var x = new int[2]; }";
+
+            const string script = "WriteLine(\"Success!\");";
+
             var ws = new WhitelistSettings();
 
-            await ws.LoadSymbolFileAsync(new MemoryStream(Encoding.UTF8.GetBytes(SimpleFile1Text)));
-
-            ws.AddSymbol(typeof(object), true);
-            ws.AddSymbol(typeof(IEnumerable<>), true);
-            ws.AddSymbol(typeof(Type));
-            ws.AddSymbol(typeof(Console), true);
             ws.AddSymbol(typeof(ScriptGlobals), true);
 
             ws.AddSdkReference("netstandard");
             ws.AddSdkReference("System.Runtime");
-            ws.AddSdkReference("System.Console");
             ws.AddReferenceByType(typeof(BoxCompilerTests));
-            //ws.AddReferenceByType(typeof(object));
-            //ws.AddReferenceByType(typeof(Console));
 
             var box = new BoxCompiler(ws, RuntimeGuardSettings.Default);
 
-            ScriptCompileResult<object?> result = await box.Compile<object?>(Script2, typeof(ScriptGlobals));
+            ScriptCompileResult<object?> result = await box.Compile<object?>(script, typeof(ScriptGlobals));
 
             var globals = new ScriptGlobals(_output);
 
@@ -44,11 +39,27 @@ namespace BoxSharp.Tests
             await result.Script!.RunAsync(globals);
         }
 
-        private const string SimpleFile1Text = "T:System.Collections.Generic.List`1.*";
+        [Fact]
+        public async Task Compile_IllegalSymbol_Error()
+        {
+            //const string script = "for (int i = 0; i < 10; i++) {WriteLine($\"Loop {i}\"); var x = new int[2]; }";
 
-        private const string Script1 = "WriteLine(\"Hello Script World!\");";
+            const string script = "System.Type.GetType(\"ATypeName\");";
 
-        private const string Script2 = "for (int i = 0; i < 10; i++) {WriteLine($\"Loop {i}\"); var x = new int[2]; }";
+            var ws = new WhitelistSettings();
+
+            ws.AddSymbol(typeof(ScriptGlobals), true);
+
+            ws.AddSdkReference("netstandard");
+            ws.AddSdkReference("System.Runtime");
+            ws.AddReferenceByType(typeof(BoxCompilerTests));
+
+            var box = new BoxCompiler(ws, RuntimeGuardSettings.Default);
+
+            ScriptCompileResult<object?> result = await box.Compile<object?>(script, typeof(ScriptGlobals));
+
+            Assert.Equal(CompileStatus.Failed, result.Status);
+        }
 
         public class ScriptGlobals
         {

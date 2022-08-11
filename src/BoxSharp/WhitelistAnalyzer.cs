@@ -14,6 +14,14 @@ namespace BoxSharp
     /// </summary>
     internal class WhitelistAnalyzer
     {
+        internal static readonly DiagnosticDescriptor IllegalSymbolDescriptor = new(
+            "BOX001",
+            "Illegal symbol",
+            "Symbol is not whitelisted: {0}",
+            "BoxSharp",
+            DiagnosticSeverity.Error,
+            true);
+
         private readonly WhitelistSettings _settings;
 
         public WhitelistAnalyzer(WhitelistSettings settings)
@@ -28,7 +36,7 @@ namespace BoxSharp
         /// <param name="syntaxTree">A syntax tree within the compilation</param>
         /// <returns>A list of symbols that are illegal to use</returns>
         /// <exception cref="InvalidOperationException">No symbols have been whitelisted</exception>
-        public async Task<IList<ISymbol>> AnalyzeAsync(Compilation compilation, SyntaxTree syntaxTree)
+        public async Task<IList<(ISymbol, Diagnostic)>> AnalyzeAsync(Compilation compilation, SyntaxTree syntaxTree)
         {
             var whitelistSymbols = new Dictionary<ISymbol, bool>(SymbolEqualityComparer.Default);
             var checkedSymbols = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
@@ -55,7 +63,7 @@ namespace BoxSharp
             // TODO Can ignoreAcccessbility be false?
             SemanticModel sem = compilation.GetSemanticModel(syntaxTree, true);
 
-            var results = new List<ISymbol>();
+            var results = new List<(ISymbol, Diagnostic)>();
 
             SyntaxNode root = await syntaxTree.GetRootAsync();
 
@@ -73,10 +81,16 @@ namespace BoxSharp
 
                 foreach (ISymbol s in GetSymbolAndOverridenSymbols(symbol))
                 {
-                    if (!IsWhitelisted(s))
-                    {
-                        results.Add(s);
-                    }
+                    if (IsWhitelisted(s))
+                        continue;
+
+                    var decId = DocumentationCommentId.CreateDeclarationId(s);
+
+                    Diagnostic diag = s.Locations.Length == 1
+                        ? Diagnostic.Create(IllegalSymbolDescriptor, s.Locations[0], messageArgs: decId)
+                        : Diagnostic.Create(IllegalSymbolDescriptor, null, s.Locations, messageArgs: decId);
+
+                    results.Add((s, diag));
                 }
             }
 
