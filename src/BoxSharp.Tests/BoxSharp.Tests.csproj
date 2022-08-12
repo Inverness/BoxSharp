@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
@@ -23,6 +23,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BoxSharp\BoxSharp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="ScriptFiles\**\*.csx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="ScriptFiles\.meta\*.csx" />
   </ItemGroup>
 
 </Project>

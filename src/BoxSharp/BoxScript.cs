@@ -109,13 +109,13 @@ namespace BoxSharp
     public class BoxScript<T> : BoxScript, IDisposable
     {
         private readonly GidReservation _gid;
-        private readonly Script<T> _script;
+        private readonly Func<Task<object>> _entryPoint;
         private bool _isDisposed;
 
-        internal BoxScript(GidReservation gid, Script<T> script)
+        internal BoxScript(GidReservation gid, Func<Task<object>> entryPoint)
         {
             _gid = gid;
-            _script = script;
+            _entryPoint = entryPoint;
         }
 
         public async Task<T> RunAsync(object? globals = null, CancellationToken token = default)
@@ -123,11 +123,11 @@ namespace BoxSharp
             if (_isDisposed)
                 throw new ObjectDisposedException(GetType().Name);
 
-            ScriptState<T> scriptState = null!;
+            T result = default!;
 
-            await RunInContextAsync(async () => scriptState = await _script.RunAsync(globals, token));
+            await RunInContextAsync(async () => result = (T) await _entryPoint());
 
-            return scriptState.ReturnValue;
+            return result;
         }
 
         internal override async ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func)

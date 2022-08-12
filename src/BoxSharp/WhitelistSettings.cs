@@ -23,6 +23,7 @@ namespace BoxSharp
             _symbols = new();
             _references = new(s_referenceComparer);
 
+            AddReferenceByType(typeof(object));
             AddReferenceByType(typeof(RuntimeGuardInterface));
         }
 

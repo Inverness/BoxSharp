@@ -13,7 +13,7 @@ namespace BoxSharp
     {
         public ScriptCompileResult(
             CompileStatus result,
-            IList<Diagnostic>? diagnostics = null,
+            IReadOnlyList<Diagnostic>? diagnostics = null,
             BoxScript<T>? script = null)
         {
             Status = result;
@@ -26,9 +26,9 @@ namespace BoxSharp
 
         public CompileStatus Status { get; }
 
-        public IList<Diagnostic> Diagnostics { get; }
+        public IReadOnlyList<Diagnostic> Diagnostics { get; }
 
-        public IList<Diagnostic> ErrorDiagnostics { get; }
+        public IReadOnlyList<Diagnostic> ErrorDiagnostics { get; }
 
         public BoxScript<T>? Script { get; }
     }

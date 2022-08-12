@@ -1,9 +1,12 @@
 ﻿using System.IO;
+using System.Text;
 
 namespace BoxSharp
 {
     internal static class FileUtilities
     {
+        internal static Encoding Utf8NoBomEncoding = new UTF8Encoding(false);
+
         public static FileStream OpenAsyncRead(string path)
         {
             return new FileStream(path,

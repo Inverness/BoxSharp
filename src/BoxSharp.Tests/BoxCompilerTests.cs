@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.CodeAnalysis.Text;
 using Xunit.Abstractions;
 
 namespace BoxSharp.Tests
@@ -18,15 +19,17 @@ namespace BoxSharp.Tests
         {
             //const string script = "for (int i = 0; i < 10; i++) {WriteLine($\"Loop {i}\"); var x = new int[2]; }";
 
-            const string script = "WriteLine(\"Success!\");";
+            const string script = "System.Console.WriteLine(\"Success!\");";
 
             var ws = new WhitelistSettings();
 
             ws.AddSymbol(typeof(ScriptGlobals), true);
+            ws.AddSymbol(typeof(Console), true);
 
             ws.AddSdkReference("netstandard");
             ws.AddSdkReference("System.Runtime");
             ws.AddReferenceByType(typeof(BoxCompilerTests));
+            ws.AddReferenceByType(typeof(Console));
 
             var box = new BoxCompiler(ws, RuntimeGuardSettings.Default);
 
@@ -59,6 +62,35 @@ namespace BoxSharp.Tests
             ScriptCompileResult<object?> result = await box.Compile<object?>(script, typeof(ScriptGlobals));
 
             Assert.Equal(CompileStatus.Failed, result.Status);
+        }
+
+        [Fact]
+        public async Task Compile_ScriptFileWithLoad_Success()
+        {
+            var ws = new WhitelistSettings();
+
+            ws.AddSymbol(typeof(ScriptGlobals), true);
+            ws.AddSymbol(typeof(Console), true);
+            ws.AddSymbol(typeof(string), true);
+
+            ws.AddSdkReference("netstandard");
+            ws.AddSdkReference("System.Runtime");
+            ws.AddReferenceByType(typeof(BoxCompilerTests));
+            ws.AddReferenceByType(typeof(Console));
+
+            var scriptFilesPath = Path.Combine(Directory.GetCurrentDirectory(), "ScriptFiles");
+
+            var compiler = new BoxCompiler(ws, RuntimeGuardSettings.Default, scriptBaseDirectory: scriptFilesPath, isDebug: true);
+
+            using var stream = FileUtilities.OpenAsyncRead("ScriptFiles/HelloWorld.csx");
+
+            var result = await compiler.Compile<object>(stream, typeof(ScriptGlobals));
+
+            Assert.Equal(CompileStatus.Success, result.Status);
+
+            var globals = new ScriptGlobals(_output);
+
+            await result.Script!.RunAsync(globals);
         }
 
         public class ScriptGlobals

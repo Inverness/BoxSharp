@@ -36,7 +36,10 @@ namespace BoxSharp
         /// <param name="syntaxTree">A syntax tree within the compilation</param>
         /// <returns>A list of symbols that are illegal to use</returns>
         /// <exception cref="InvalidOperationException">No symbols have been whitelisted</exception>
-        public async Task<IList<(ISymbol, Diagnostic)>> AnalyzeAsync(Compilation compilation, SyntaxTree syntaxTree)
+        public async Task<IList<(ISymbol, Diagnostic)>> AnalyzeAsync(
+            Compilation compilation,
+            SyntaxTree syntaxTree,
+            ISet<ISymbol> declaredSymbols)
         {
             var whitelistSymbols = new Dictionary<ISymbol, bool>(SymbolEqualityComparer.Default);
             var checkedSymbols = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
@@ -98,7 +101,7 @@ namespace BoxSharp
 
             bool IsWhitelisted(ISymbol symbol)
             {
-                if (whitelistSymbols.ContainsKey(symbol))
+                if (whitelistSymbols.ContainsKey(symbol) || declaredSymbols.Contains(symbol))
                     return true;
 
                 ISymbol? current = symbol.ContainingSymbol;
