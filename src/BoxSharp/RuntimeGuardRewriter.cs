@@ -387,24 +387,11 @@ namespace BoxSharp
         {
             if (_scriptClassName != null)
             {
-                return MemberAccessExpression(
-                    SyntaxKind.SimpleMemberAccessExpression,
-                    MemberAccessExpression(
-                        SyntaxKind.SimpleMemberAccessExpression,
-                        AliasQualifiedName(
-                            IdentifierName(Token(SyntaxKind.GlobalKeyword)),
-                            IdentifierName(_scriptClassName)),
-                        IdentifierName(_genClassName)),
-                    IdentifierName(ScriptClassGenerator.RuntimeGuardFieldName));
+                return BoxSyntaxFactory.MakeRgAccess(_scriptClassName, _genClassName);
             }
             else
             {
-                return MemberAccessExpression(
-                    SyntaxKind.SimpleMemberAccessExpression,
-                    AliasQualifiedName(
-                        IdentifierName(Token(SyntaxKind.GlobalKeyword)),
-                        IdentifierName(_genClassName)),
-                    IdentifierName(ScriptClassGenerator.RuntimeGuardFieldName));
+                return BoxSyntaxFactory.MakeRgAccess(_genClassName);
             }
         }
 

@@ -106,6 +106,8 @@ namespace BoxSharp.Tests
             {
                 _output.WriteLine(text);
             }
+
+            public bool IsUnitTest => true;
         }
     }
 }

@@ -9,7 +9,7 @@ public static void WriteHeaderLine(string text)
 
     var h = new string('-', s);
 
-    System.Console.WriteLine(h);
-    System.Console.WriteLine(text);
-    System.Console.WriteLine(h);
+    WriteLine(h);
+    WriteLine(text);
+    WriteLine(h);
 }

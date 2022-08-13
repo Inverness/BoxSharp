@@ -103,7 +103,7 @@ namespace BoxSharp
             return arg => current.RunInContextAsync(() => new ValueTask<TRes>(func(arg))).GetAwaiter().GetResult();
         }
 
-        internal abstract ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func);
+        internal abstract ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func, object? globals = null);
     }
 
     public class BoxScript<T> : BoxScript, IDisposable
@@ -125,18 +125,18 @@ namespace BoxSharp
 
             T result = default!;
 
-            await RunInContextAsync(async () => result = (T) await _entryPoint());
+            await RunInContextAsync(async () => result = (T) await _entryPoint(), globals);
 
             return result;
         }
 
-        internal override async ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func)
+        internal override async ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func, object? globals = null)
         {
             RuntimeGuard rg = RuntimeGuardInstances.Get(_gid.Gid);
 
             BoxScript? oldCurrent = Current;
             Current = this;
-            rg.Start();
+            rg.Start(globals);
             try
             {
                 return await func();

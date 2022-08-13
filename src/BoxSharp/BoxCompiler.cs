@@ -176,12 +176,12 @@ namespace BoxSharp
                 {
                     SemanticModel? semanticModel = null;
 
-                    if (node is not MemberDeclarationSyntax member)
+                    if (node is not MemberDeclarationSyntax && node is not VariableDeclaratorSyntax)
                         continue;
 
                     semanticModel ??= compilation.GetSemanticModel(tree);
 
-                    ISymbol? symbol = semanticModel.GetDeclaredSymbol(member);
+                    ISymbol? symbol = semanticModel.GetDeclaredSymbol(node);
 
                     if (symbol != null)
                     {
@@ -217,8 +217,9 @@ namespace BoxSharp
             {
                 // Generate a class that will hold the static RuntimeGuard instance used in the rest of the code
                 // The field will be initialized using the previously allocated GID.
+                var scg = new ScriptClassGenerator(gid.Gid, compilation, scriptClassName, globalsType);
 
-                (SyntaxTree genSyntaxTree, string genClassName) = ScriptClassGenerator.Generate(gid.Gid);
+                (SyntaxTree genSyntaxTree, string genClassName) = scg.Generate();
 
                 // TODO Consider using OperationWalker instead
                 var rewriter = new RuntimeGuardRewriter(gid.Gid, scriptClassName, genClassName, compilation);
