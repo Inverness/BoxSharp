@@ -275,8 +275,6 @@ namespace BoxSharp
 
             Assembly assembly = Assembly.Load(asmMemoryStream.ToArray(), pdbMemoryStream.ToArray());
 
-            File.WriteAllBytes(@"C:\Projects\dump.dll", asmMemoryStream.ToArray());
-            File.WriteAllBytes(@"C:\Projects\dump.pdb", pdbMemoryStream.ToArray());
 
             Func<Task<object>> runner = GetScriptEntryPoint(assembly, scriptClassName);
 
