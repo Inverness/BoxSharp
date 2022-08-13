@@ -26,14 +26,10 @@ namespace BoxSharp.Runtime.Internal
         [ThreadStatic] private static long t_staticConstructorStackBaseline;
         private HashSet<IDisposable>? _disposables;
 
-        private object? _globals;
-
         internal RuntimeGuard()
         {
             _stopwatch = new Stopwatch();
         }
-
-        public object? Globals => _globals;
 
         internal void GuardEnter()
         {
@@ -178,11 +174,9 @@ namespace BoxSharp.Runtime.Internal
             _disposables?.Clear();
         }
 
-        internal void Start(object? globals)
+        internal void Start()
         {
             _active = true;
-
-            _globals = globals;
 
             _stopwatch.Stop();
             _stopwatch.Reset();
@@ -191,7 +185,6 @@ namespace BoxSharp.Runtime.Internal
         internal void Stop()
         {
             _active = false;
-            _globals = null;
             if (_disposables == null)
                 return;
             foreach (IDisposable disposable in _disposables)

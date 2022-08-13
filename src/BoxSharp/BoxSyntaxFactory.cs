@@ -1,8 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Text;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Editing;
@@ -20,6 +17,8 @@ namespace BoxSharp
             {
                 if (s_syntaxGenerator == null)
                 {
+                    // The normal way of getting a SyntaxGenerator instance involves using a bunch of workspace related types
+                    // that we don't need. Instead we'll just construct an instance of the internal CSharpSyntaxGenerator directly.
                     const string sgTypeName = "Microsoft.CodeAnalysis.CSharp.CodeGeneration.CSharpSyntaxGenerator, Microsoft.CodeAnalysis.CSharp.Workspaces";
 
                     Type sgType = Type.GetType(sgTypeName, true, false);
@@ -31,12 +30,22 @@ namespace BoxSharp
             }
         }
 
+        /// <summary>
+        /// Makes a special name that cannot be referenced by parsed C# code.
+        /// </summary>
+        /// <param name="name"></param>
+        /// <returns></returns>
         internal static string MakeSpecialName(string name)
         {
             return $"\u003C{name}\u003E";
         }
 
-        internal static MemberAccessExpressionSyntax MakeGlobalMemberAccess(params string[] names)
+        internal static AliasQualifiedNameSyntax GlobalAliasedName(string name)
+        {
+            return AliasQualifiedName(IdentifierName(Token(SyntaxKind.GlobalKeyword)), IdentifierName(name));
+        }
+
+        internal static MemberAccessExpressionSyntax GlobalMemberAccess(params string[] names)
         {
             Debug.Assert(names != null && names.Length > 1);
 
@@ -45,9 +54,7 @@ namespace BoxSharp
 
             MemberAccessExpressionSyntax expr = MemberAccessExpression(
                 SyntaxKind.SimpleMemberAccessExpression,
-                AliasQualifiedName(
-                    IdentifierName(Token(SyntaxKind.GlobalKeyword)),
-                    IdentifierName(names![0])),
+                GlobalAliasedName(names![0]),
                 IdentifierName(names[1]));
 
             for (int i = 2; i < names.Length; i++)
@@ -61,7 +68,7 @@ namespace BoxSharp
             return expr;
         }
 
-        internal static MemberAccessExpressionSyntax MakeMemberAccess(ExpressionSyntax expr, params string[] names)
+        internal static MemberAccessExpressionSyntax MemberAccess(ExpressionSyntax expr, params string[] names)
         {
             Debug.Assert(names != null && names.Length > 0);
 
@@ -75,27 +82,32 @@ namespace BoxSharp
             return (MemberAccessExpressionSyntax) expr;
         }
 
-        internal static MemberAccessExpressionSyntax MakeRgAccess(string scriptClassName, string genClassName)
+        internal static NameSyntax GlobalQualifiedName(params string[] names)
         {
-            return MemberAccessExpression(
-                SyntaxKind.SimpleMemberAccessExpression,
-                MemberAccessExpression(
-                    SyntaxKind.SimpleMemberAccessExpression,
-                    AliasQualifiedName(
-                        IdentifierName(Token(SyntaxKind.GlobalKeyword)),
-                        IdentifierName(scriptClassName)),
-                    IdentifierName(genClassName)),
-                IdentifierName(ScriptClassGenerator.RuntimeGuardFieldName));
+            Debug.Assert(names != null && names.Length > 0);
+
+            NameSyntax q = GlobalAliasedName(names![0]);
+
+            for (int i = 1; i < names.Length; i++)
+            {
+                q = QualifiedName(q, IdentifierName(names[i]));
+            }
+
+            return q;
         }
 
-        internal static MemberAccessExpressionSyntax MakeRgAccess(string genClassName)
+        internal static AttributeSyntax AggressiveInliningAttribute()
         {
-            return MemberAccessExpression(
-                SyntaxKind.SimpleMemberAccessExpression,
-                AliasQualifiedName(
-                    IdentifierName(Token(SyntaxKind.GlobalKeyword)),
-                    IdentifierName(genClassName)),
-                IdentifierName(ScriptClassGenerator.RuntimeGuardFieldName));
+            NameSyntax attrName = GlobalQualifiedName("System", "Runtime", "CompilerServices", "MethodImpl");
+
+            MemberAccessExpressionSyntax optionsArg = GlobalMemberAccess("System", "Runtime", "CompilerServices", "MethodImplOptions", "AggressiveInlining");
+
+            return Attribute(attrName, AttributeArgumentList(SingletonSeparatedList(AttributeArgument(optionsArg))));
+        }
+
+        internal static AttributeListSyntax AggressiveInliningAttributeList()
+        {
+            return AttributeList(SingletonSeparatedList(AggressiveInliningAttribute()));
         }
     }
 }

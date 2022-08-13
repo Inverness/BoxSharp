@@ -12,31 +12,36 @@ namespace BoxSharp
     /// </summary>
     internal class RuntimeGuardRewriter : CSharpSyntaxRewriter
     {
-        private readonly int _gid;
-        private readonly string? _scriptClassName;
-        private readonly string _genClassName;
-        private readonly Compilation _compilation;
+        private readonly ExpressionSyntax _runtimeGuardField;
 
-        private bool _handledFirstGlobal;
+        private bool _insertedGlobal;
 
         private StatementSyntax? _enterMethodNode;
         private StatementSyntax? _enterStaticConstructorNode;
         private StatementSyntax? _exitStaticConstructorNode;
         private StatementSyntax? _beforeJumpNode;
 
-        public RuntimeGuardRewriter(int gid, string? scriptClassName, string genClassName, Compilation compilation)
+        public RuntimeGuardRewriter(ExpressionSyntax runtimeGuardField)
         {
-            if (gid <= 0)
-                throw new ArgumentOutOfRangeException(nameof(gid));
-            _gid = gid;
-            _scriptClassName = scriptClassName;
-            _genClassName = genClassName;
-            _compilation = compilation;
+            _runtimeGuardField = runtimeGuardField;
         }
 
-        public SyntaxNode Rewrite(SyntaxNode root)
+        public CompilationUnitSyntax Rewrite(CompilationUnitSyntax root)
         {
-            return Visit(root);
+            var cu = (CompilationUnitSyntax) Visit(root);
+
+            // The same RuntimeGuardRewriter instance will be used for all syntax trees and ensures
+            // that the enter method call will be inserted before any other global statements.
+            if (!_insertedGlobal)
+            {
+                GlobalStatementSyntax globalStatement = GlobalStatement(InsertEnterMethod((SyntaxNode?)null));
+
+                cu = cu.WithMembers(cu.Members.Insert(0, globalStatement));
+
+                _insertedGlobal = true;
+            }
+
+            return cu;
         }
 
         public override SyntaxNode VisitConstructorDeclaration(ConstructorDeclarationSyntax node)
@@ -86,29 +91,18 @@ namespace BoxSharp
             return InsertEnterMethod(node);
         }
 
-        public override SyntaxNode? VisitGlobalStatement(GlobalStatementSyntax node)
-        {
-            node = (GlobalStatementSyntax) base.VisitGlobalStatement(node)!;
-
-            if (_handledFirstGlobal)
-                return node;
-
-            _handledFirstGlobal = true;
-            return node.WithStatement(InsertEnterMethod(node.Statement));
-        }
-
         public override SyntaxNode? VisitObjectCreationExpression(ObjectCreationExpressionSyntax node)
         {
             node = (ObjectCreationExpressionSyntax) base.VisitObjectCreationExpression(node)!;
 
-            return MakeRgInvocation(nameof(AfterNewObject), _gid, node);
+            return MakeRgInvocation(nameof(AfterNewObject), node);
         }
 
         public override SyntaxNode? VisitArrayCreationExpression(ArrayCreationExpressionSyntax node)
         {
             node = (ArrayCreationExpressionSyntax) base.VisitArrayCreationExpression(node)!;
 
-            return MakeRgInvocation(nameof(AfterNewArray), _gid, node);
+            return MakeRgInvocation(nameof(AfterNewArray), node);
         }
 
         public override SyntaxNode? VisitDoStatement(DoStatementSyntax node)
@@ -157,38 +151,19 @@ namespace BoxSharp
         {
             node = (AwaitExpressionSyntax) base.VisitAwaitExpression(node)!;
 
-            InvocationExpressionSyntax beforeAwait = MakeRgInvocation(nameof(BeforeAwait), _gid, node.Expression);
+            InvocationExpressionSyntax beforeAwait = MakeRgInvocation(nameof(BeforeAwait), node.Expression);
 
             node = node.WithExpression(beforeAwait);
 
-            InvocationExpressionSyntax afterAwait = MakeRgInvocation(nameof(AfterAwait), _gid, node);
+            InvocationExpressionSyntax afterAwait = MakeRgInvocation(nameof(AfterAwait), node);
 
             return afterAwait;
         }
 
-        // private SemanticModel GetSemanticModel()
-        // {
-        //     if (_semanticModel == null)
-        //     {
-        //         _semanticModel = _compilation.GetSemanticModel(_tree);
-        //     }
-
-        //     return _semanticModel;
-        // }
-
         private StatementSyntax InsertBeforeJump(StatementSyntax node)
         {
             if (_beforeJumpNode == null)
-                _beforeJumpNode = MakeRgInvocationStatement(nameof(BeforeJump), _gid);
-
-            // InitSemanticModel();
-
-            // ControlFlowAnalysis? flowAnalysis = _semanticModel.AnalyzeControlFlow(node);
-
-            // if (flowAnalysis?.Succeeded == true)
-            // {
-
-            // }
+                _beforeJumpNode = MakeRgInvocationStatement(nameof(BeforeJump));
 
             if (node is BlockSyntax block)
             {
@@ -238,10 +213,10 @@ namespace BoxSharp
             }
         }
 
-        private BlockSyntax InsertEnterMethod(SyntaxNode node)
+        private BlockSyntax InsertEnterMethod(SyntaxNode? node)
         {
             if (_enterMethodNode == null)
-                _enterMethodNode = MakeRgInvocationStatement(nameof(EnterMethod), _gid);
+                _enterMethodNode = MakeRgInvocationStatement(nameof(EnterMethod));
 
             if (node is ExpressionSyntax expr)
             {
@@ -254,16 +229,21 @@ namespace BoxSharp
                 return Block(_enterMethodNode, stmt);
             }
 
+            if (node == null)
+            {
+                return Block(_enterMethodNode);
+            }
+
             throw new NotImplementedException();
         }
 
         private BlockSyntax InsertEnterStaticConstructorMethod(SyntaxNode node)
         {
             if (_enterStaticConstructorNode == null)
-                _enterStaticConstructorNode = MakeRgInvocationStatement(nameof(EnterStaticConstructor), _gid);
+                _enterStaticConstructorNode = MakeRgInvocationStatement(nameof(EnterStaticConstructor));
 
             if (_exitStaticConstructorNode == null)
-                _exitStaticConstructorNode = MakeRgInvocationStatement(nameof(ExitStaticConstructor), _gid);
+                _exitStaticConstructorNode = MakeRgInvocationStatement(nameof(ExitStaticConstructor));
 
             if (node is ExpressionSyntax expr)
             {
@@ -283,149 +263,38 @@ namespace BoxSharp
             return node.Modifiers.Any(SyntaxKind.StaticKeyword);
         }
 
-        // private static SyntaxNode? GetMethodBody(SyntaxNode node)
-        // {
-        //     if (node is BaseMethodDeclarationSyntax m)
-        //     {
-        //         if (m.Body != null)
-        //             return m.Body;
-        //         if (m.ExpressionBody != null)
-        //             return m.ExpressionBody;
-        //         throw new NotImplementedException();
-        //     }
-        //     if (node is AccessorDeclarationSyntax a)
-        //     {
-        //         if (a.Body != null)
-        //             return a.Body;
-        //         if (a.ExpressionBody != null)
-        //             return a.ExpressionBody;
-        //         throw new NotImplementedException();
-        //     }
-        //     return null;
-        // }
-
-        // private static bool IsMethodBody(SyntaxNode node)
-        // {
-        //     if (node is BaseMethodDeclarationSyntax || node is AccessorDeclarationSyntax)
-        //         return true;
-
-        //     return node.Parent!.Kind() switch
-        //     {
-        //         SyntaxKind.MethodDeclaration or
-        //         SyntaxKind.GetAccessorDeclaration or
-        //         SyntaxKind.SetAccessorDeclaration or
-        //         SyntaxKind.AddAccessorDeclaration or
-        //         SyntaxKind.RemoveAccessorDeclaration or
-        //         SyntaxKind.AnonymousMethodExpression or
-        //         SyntaxKind.SimpleLambdaExpression or
-        //         SyntaxKind.ParenthesizedLambdaExpression or
-        //         SyntaxKind.ConstructorDeclaration => true,
-        //         _ => false,
-        //     };
-        // }
-
         private static InvocationExpressionSyntax MakeRgInvocationCore(string methodName)
         {
             return InvocationExpression(
-                MemberAccessExpression(
-                    SyntaxKind.SimpleMemberAccessExpression,
-                    MemberAccessExpression(
-                        SyntaxKind.SimpleMemberAccessExpression,
-                        MemberAccessExpression(
-                            SyntaxKind.SimpleMemberAccessExpression,
-                            MemberAccessExpression(
-                                SyntaxKind.SimpleMemberAccessExpression,
-                                AliasQualifiedName(
-                                    IdentifierName(
-                                        Token(SyntaxKind.GlobalKeyword)),
-                                    IdentifierName("BoxSharp")),
-                                IdentifierName("Runtime")),
-                            IdentifierName("Internal")),
-                        IdentifierName("RuntimeGuardInterface")),
-                    IdentifierName(methodName)));
+                BoxSyntaxFactory.GlobalMemberAccess(
+                    "BoxSharp",
+                    "Runtime",
+                    "Internal",
+                    "RuntimeGuardInterface",
+                    methodName));
         }
 
-        //private static InvocationExpressionSyntax MakeRgInvocationCore(string methodName, TypeSyntax genericType)
-        //{
-        //    return InvocationExpression(
-        //        MemberAccessExpression(
-        //            SyntaxKind.SimpleMemberAccessExpression,
-        //            MemberAccessExpression(
-        //                SyntaxKind.SimpleMemberAccessExpression,
-        //                MemberAccessExpression(
-        //                    SyntaxKind.SimpleMemberAccessExpression,
-        //                    MemberAccessExpression(
-        //                        SyntaxKind.SimpleMemberAccessExpression,
-        //                        AliasQualifiedName(
-        //                            IdentifierName(
-        //                                Token(SyntaxKind.GlobalKeyword)),
-        //                            IdentifierName("BoxSharp")),
-        //                        IdentifierName("Runtime")),
-        //                    IdentifierName("Internal")),
-        //                IdentifierName("RuntimeGuardInterface")),
-        //            GenericName(
-        //                Identifier(methodName),
-        //                TypeArgumentList(SingletonSeparatedList(genericType)))));
-        //}
-
-        //internal static ExpressionStatementSyntax MakeRuntimeGuardCall(string methodName)
-        //{
-        //    return ExpressionStatement(MakeRuntimeGuardInvocation(methodName));
-        //}
-
-        private ExpressionStatementSyntax MakeRgInvocationStatement(string methodName, int _)
+        private ExpressionStatementSyntax MakeRgInvocationStatement(string methodName)
         {
             return ExpressionStatement(
                 MakeRgInvocationCore(methodName)
                 .WithArgumentList(
                     ArgumentList(
                         SingletonSeparatedList(
-                            Argument(MakeRgAccess())))));
+                            Argument(_runtimeGuardField)))));
         }
 
-        private MemberAccessExpressionSyntax MakeRgAccess()
-        {
-            if (_scriptClassName != null)
-            {
-                return BoxSyntaxFactory.MakeRgAccess(_scriptClassName, _genClassName);
-            }
-            else
-            {
-                return BoxSyntaxFactory.MakeRgAccess(_genClassName);
-            }
-        }
-
-        private InvocationExpressionSyntax MakeRgInvocation(
-            string methodName,
-            int gid,
-            ExpressionSyntax genericArg)
+        private InvocationExpressionSyntax MakeRgInvocation(string methodName, ExpressionSyntax genericArg)
         {
             return MakeRgInvocationCore(methodName)
                     .WithArgumentList(
                         ArgumentList(
                             SeparatedList<ArgumentSyntax>(
                                 NodeOrTokenList(
-                                    Argument(MakeRgAccess()),
+                                    Argument(_runtimeGuardField),
                                     Token(SyntaxKind.CommaToken),
                                     Argument(genericArg)
                                     ))));
         }
-
-        //internal static InvocationExpressionSyntax MakeRuntimeGuardCall(
-        //    string methodName,
-        //    TypeSyntax genericType,
-        //    int gid,
-        //    ExpressionSyntax genericArg)
-        //{
-        //    return MakeRuntimeGuardInvocation(methodName, genericType)
-        //        .WithArgumentList(
-        //            ArgumentList(
-        //                SeparatedList<ArgumentSyntax>(
-        //                    NodeOrTokenList(
-        //                        Argument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(gid))),
-        //                        Token(SyntaxKind.CommaToken),
-        //                        Argument(genericArg)
-        //                        ))));
-        //}
     }
 }

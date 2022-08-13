@@ -106,16 +106,25 @@ namespace BoxSharp
         internal abstract ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func, object? globals = null);
     }
 
-    public class BoxScript<T> : BoxScript, IDisposable
+    public class BoxScript<T> : BoxScript
     {
-        private readonly GidReservation _gid;
+        private readonly RuntimeGuard _runtimeGuard;
         private readonly Func<Task<object>> _entryPoint;
+        private readonly Action<RuntimeGuard> _runtimeGuardSetter;
+        private readonly Action<object?>? _globalsSetter;
         private bool _isDisposed;
+        private bool _isInitialized;
 
-        internal BoxScript(GidReservation gid, Func<Task<object>> entryPoint)
+        internal BoxScript(
+            RuntimeGuard runtimeGuard,
+            Func<Task<object>> entryPoint,
+            Action<RuntimeGuard> runtimeGuardSetter,
+            Action<object?>? globalsSetter)
         {
-            _gid = gid;
+            _runtimeGuard = runtimeGuard;
             _entryPoint = entryPoint;
+            _runtimeGuardSetter = runtimeGuardSetter;
+            _globalsSetter = globalsSetter;
         }
 
         public async Task<T> RunAsync(object? globals = null, CancellationToken token = default)
@@ -132,29 +141,46 @@ namespace BoxSharp
 
         internal override async ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func, object? globals = null)
         {
-            RuntimeGuard rg = RuntimeGuardInstances.Get(_gid.Gid);
+            if (!_isInitialized)
+            {
+                // TODO Set the RuntimeGuard field in BoxCompiler?
+                _runtimeGuardSetter(_runtimeGuard);
+
+                if (_globalsSetter != null)
+                {
+                    if (globals == null)
+                        throw new InvalidOperationException("Globals required");
+                    _globalsSetter(globals);
+                }
+                else if (globals != null)
+                {
+                    throw new InvalidOperationException("Script does not use globals");
+                }
+
+                _isInitialized = true;
+            }
 
             BoxScript? oldCurrent = Current;
             Current = this;
-            rg.Start(globals);
+            _runtimeGuard.Start();
             try
             {
                 return await func();
             }
             finally
             {
-                rg.Stop();
+                _runtimeGuard.Stop();
                 Current = oldCurrent;
             }
         }
 
-        public void Dispose()
-        {
-            if (!_isDisposed)
-            {
-                _gid.Dispose();
-                _isDisposed = true;
-            }
-        }
+        //public void Dispose()
+        //{
+        //    if (!_isDisposed)
+        //    {
+        //        //_gid.Dispose();
+        //        _isDisposed = true;
+        //    }
+        //}
     }
 }

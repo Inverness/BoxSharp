@@ -1,18 +1,18 @@
-﻿using BoxSharp.Runtime.Internal;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Emit;
-using Microsoft.CodeAnalysis.Scripting;
-using Microsoft.CodeAnalysis.Text;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
+using BoxSharp.Runtime.Internal;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Emit;
+using Microsoft.CodeAnalysis.Text;
 
 #pragma warning disable RS2008
 
@@ -30,6 +30,8 @@ namespace BoxSharp
                                      "BoxSharp",
                                      DiagnosticSeverity.Error,
                                      true);
+
+        private static int s_gidCounter;
 
         private readonly WhitelistSettings _whitelistSettings;
 
@@ -78,10 +80,11 @@ namespace BoxSharp
             // The most significant limitation is that syntax trees produced by a #load directive
             // cannot be replaced, which prevents injection of RuntimeGuard calls.
 
-            GidReservation gid = RuntimeGuardInstances.Allocate(_runtimeGuardSettings);
+            //GidReservation gid = RuntimeGuardInstances.Allocate(_runtimeGuardSettings);
+            int gid = Interlocked.Increment(ref s_gidCounter);
 
-            string assemblyName = "BoxScriptAssembly" + gid.Gid;
-            string scriptClassName = "BoxScript" + gid.Gid;
+            string assemblyName = "BoxScriptAssembly" + gid;
+            string scriptClassName = "BoxScript" + gid;
 
             var diagnostics = new List<Diagnostic>();
             bool hasErrors = false;
@@ -217,12 +220,12 @@ namespace BoxSharp
             {
                 // Generate a class that will hold the static RuntimeGuard instance used in the rest of the code
                 // The field will be initialized using the previously allocated GID.
-                var scg = new ScriptClassGenerator(gid.Gid, compilation, scriptClassName, globalsType);
+                var scg = new ScriptClassGenerator(gid, compilation, scriptClassName, globalsType);
 
-                (SyntaxTree genSyntaxTree, string genClassName) = scg.Generate();
+                SyntaxTree genSyntaxTree = scg.Generate();
 
                 // TODO Consider using OperationWalker instead
-                var rewriter = new RuntimeGuardRewriter(gid.Gid, scriptClassName, genClassName, compilation);
+                var rewriter = new RuntimeGuardRewriter(scg.GetRuntimeGuardFieldExpression());
 
                 foreach (SyntaxTree oldTree in compilation.SyntaxTrees.ToArray())
                 {
@@ -268,25 +271,33 @@ namespace BoxSharp
 
             if (status == CompileStatus.Failed)
             {
-                gid?.Dispose();
-
                 return new ScriptCompileResult<T>(status, diagnostics, null);
             }
 
             Assembly assembly = Assembly.Load(asmMemoryStream.ToArray(), pdbMemoryStream.ToArray());
 
+            Type scriptClassType = assembly.GetType(scriptClassName, true, false);
 
-            Func<Task<object>> runner = GetScriptEntryPoint(assembly, scriptClassName);
+            Func<Task<object>> runner = GetScriptEntryPoint(scriptClassType);
 
-            var boxScript = new BoxScript<T>(gid!, runner);
+            Action<RuntimeGuard> runtimeGuardSetter = ReflectionUtilities.MakeStaticFieldSetter<RuntimeGuard>(scriptClassType, ScriptClassGenerator.RuntimeGuardFieldName);
+            Action<object?>? globalsSetter = null;
+
+            if (globalsType != null)
+            {
+                globalsSetter = ReflectionUtilities.MakeStaticFieldSetter(scriptClassType, ScriptClassGenerator.GlobalsFieldName);
+            }
+
+            var rg = new RuntimeGuard();
+            rg.Initialize(_runtimeGuardSettings);
+
+            var boxScript = new BoxScript<T>(rg, runner, runtimeGuardSetter, globalsSetter);
 
             return new ScriptCompileResult<T>(status, diagnostics, boxScript);
         }
 
-        private static Func<Task<object>> GetScriptEntryPoint(Assembly assembly, string scriptClassName)
+        private static Func<Task<object>> GetScriptEntryPoint(Type scriptClassType)
         {
-            Type scriptClassType = assembly.GetType(scriptClassName, true, false);
-
             MethodInfo? entryPointMethod = scriptClassType.GetMethod("\u003CInitialize\u003E", BindingFlags.Instance | BindingFlags.NonPublic);
 
             if (entryPointMethod == null)

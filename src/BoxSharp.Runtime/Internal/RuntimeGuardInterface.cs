@@ -8,12 +8,6 @@ namespace BoxSharp.Runtime.Internal
     public static class RuntimeGuardInterface
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static RuntimeGuard InitializeStaticField(int gid)
-        {
-            return RuntimeGuardInstances.Get(gid);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void EnterMethod(RuntimeGuard guard)
         {
             guard.GuardEnter();

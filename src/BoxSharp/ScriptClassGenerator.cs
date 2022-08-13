@@ -36,32 +36,55 @@ namespace BoxSharp
             _globalsType = globalsType;
         }
 
-        internal (SyntaxTree syntaxTree, string genClassName) Generate()
+        internal SyntaxTree Generate()
         {
-            string className = MakeGeneratedClassName(_gid);
+            var members = new List<MemberDeclarationSyntax>();
 
-            CompilationUnitSyntax cu = MakeGeneratedCompilationUnit(_gid, className);
+            FieldDeclarationSyntax runtimeGuardField = GenerateRuntimeGuardField();
+
+            members.Add(runtimeGuardField);
 
             if (_globalsType != null)
             {
-                FieldDeclarationSyntax globalsField = GenerateGlobalsField(className);
+                FieldDeclarationSyntax globalsField = GenerateGlobalsField();
 
-                cu = cu.AddMembers(globalsField);
+                members.Add(globalsField);
 
                 MemberDeclarationSyntax[] globalMembers = GenerateGlobalMembers();
 
-                if (globalMembers.Length > 0)
-                {
-                    cu = cu.AddMembers(globalMembers);
-                }
+                members.AddRange(globalMembers);
             }
 
-            cu = cu.NormalizeWhitespace();
+            CompilationUnitSyntax cu = CompilationUnit().AddMembers(members.ToArray()).NormalizeWhitespace();
 
-            return (CSharpSyntaxTree.Create(cu, new CSharpParseOptions(kind: SourceCodeKind.Script)), className);
+            return CSharpSyntaxTree.Create(cu, new CSharpParseOptions(kind: SourceCodeKind.Script));
         }
 
-        private FieldDeclarationSyntax GenerateGlobalsField(string genClassName)
+        internal ExpressionSyntax GetRuntimeGuardFieldExpression()
+        {
+            return BoxSyntaxFactory.GlobalMemberAccess(_scriptClassName, RuntimeGuardFieldName);
+        }
+
+        private FieldDeclarationSyntax GenerateRuntimeGuardField()
+        {
+            SyntaxGenerator sg = BoxSyntaxFactory.SyntaxGenerator;
+
+            INamedTypeSymbol? runtimeGuardType = _compilation.GetTypeByMetadataName(typeof(RuntimeGuard).FullName);
+
+            if (runtimeGuardType == null)
+                throw new InvalidOperationException("Could not get RuntimeGuard symbol");
+
+            SyntaxNode runtimeGuardTypeSyntax = sg.TypeExpression(runtimeGuardType);
+
+            SyntaxNode field = sg.FieldDeclaration(RuntimeGuardFieldName,
+                                                   runtimeGuardTypeSyntax,
+                                                   Accessibility.Public,
+                                                   DeclarationModifiers.Static);
+
+            return (FieldDeclarationSyntax) field;
+        }
+
+        private FieldDeclarationSyntax GenerateGlobalsField()
         {
             Debug.Assert(_globalsType != null);
 
@@ -74,17 +97,18 @@ namespace BoxSharp
 
             SyntaxNode globalsTypeSyntax = sg.TypeExpression(globalsTypeSymbol);
 
-            MemberAccessExpressionSyntax rgAccess = BoxSyntaxFactory.MakeRgAccess(_scriptClassName, genClassName);
-
-            SyntaxNode getRgGlobalsProp = sg.MemberAccessExpression(rgAccess, nameof(RuntimeGuard.Globals));
-
             return (FieldDeclarationSyntax) sg.FieldDeclaration(GlobalsFieldName,
                                                                 globalsTypeSyntax,
                                                                 Accessibility.Public,
-                                                                DeclarationModifiers.Static,
-                                                                sg.CastExpression(globalsTypeSyntax, getRgGlobalsProp));
+                                                                DeclarationModifiers.Static);
         }
 
+        /// <summary>
+        /// Examines the globals type to find members that can have declarations added as a global statement.
+        /// 
+        /// A
+        /// </summary>
+        /// <returns></returns>
         private MemberDeclarationSyntax[] GenerateGlobalMembers()
         {
             Debug.Assert(_globalsType != null);
@@ -112,9 +136,11 @@ namespace BoxSharp
 
                     SyntaxNode stmt = method.ReturnsVoid ? sg.ExpressionStatement(invokeMethod) : sg.ReturnStatement(invokeMethod);
 
-                    var newMethod = (MemberDeclarationSyntax) sg.MethodDeclaration(method, new[] { stmt });
+                    var newMethod = (MethodDeclarationSyntax) sg.MethodDeclaration(method, new[] { stmt });
 
                     newMethod = newMethod.AddModifiers(Token(SyntaxKind.StaticKeyword));
+
+                    //newMethod = newMethod.AddAttributeLists(BoxSyntaxFactory.AggressiveInliningAttributeList());
 
                     newMembers.Add(newMethod);
                 }
@@ -137,9 +163,9 @@ namespace BoxSharp
                                                          sg.IdentifierName("value"));
                     }
 
-                    var newProp = (MemberDeclarationSyntax) sg.PropertyDeclaration(prop,
-                                                                                   getStmt != null ? new[] { getStmt } : null,
-                                                                                   setStmt != null ? new[] { setStmt } : null);
+                    var newProp = (PropertyDeclarationSyntax) sg.PropertyDeclaration(prop,
+                                                                                     getStmt != null ? new[] { getStmt } : null,
+                                                                                     setStmt != null ? new[] { setStmt } : null);
 
                     newProp = newProp.AddModifiers(Token(SyntaxKind.StaticKeyword));
 
@@ -153,91 +179,6 @@ namespace BoxSharp
             {
                 return accessibility == Accessibility.NotApplicable || accessibility == Accessibility.Public;
             }
-        }
-
-        private static bool IsAllowedGlobalSymbol(SymbolKind kind)
-        {
-            switch (kind)
-            {
-                case SymbolKind.Event:
-                case SymbolKind.Field:
-                case SymbolKind.Method:
-                case SymbolKind.NamedType:
-                case SymbolKind.Property:
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
-        private static string MakeGeneratedClassName(int gid)
-        {
-            return "_BoxScriptGenerated" + gid;
-        }
-
-        private static CompilationUnitSyntax MakeGeneratedCompilationUnit(int gid, string className)
-        {
-            FieldDeclarationSyntax rgField =
-                FieldDeclaration(
-                    VariableDeclaration(
-                        QualifiedName(
-                            QualifiedName(
-                                QualifiedName(
-                                    AliasQualifiedName(
-                                        IdentifierName(
-                                            Token(SyntaxKind.GlobalKeyword)),
-                                        IdentifierName("BoxSharp")),
-                                    IdentifierName("Runtime")),
-                                IdentifierName("Internal")),
-                            IdentifierName("RuntimeGuard")))
-                    .WithVariables(
-                        SingletonSeparatedList<VariableDeclaratorSyntax>(
-                            VariableDeclarator(
-                                Identifier(RuntimeGuardFieldName))
-                            .WithInitializer(
-                                EqualsValueClause(
-                                    InvocationExpression(
-                                        MemberAccessExpression(
-                                            SyntaxKind.SimpleMemberAccessExpression,
-                                            MemberAccessExpression(
-                                                SyntaxKind.SimpleMemberAccessExpression,
-                                                MemberAccessExpression(
-                                                    SyntaxKind.SimpleMemberAccessExpression,
-                                                    MemberAccessExpression(
-                                                        SyntaxKind.SimpleMemberAccessExpression,
-                                                        AliasQualifiedName(
-                                                            IdentifierName(
-                                                                Token(SyntaxKind.GlobalKeyword)),
-                                                            IdentifierName("BoxSharp")),
-                                                        IdentifierName("Runtime")),
-                                                    IdentifierName("Internal")),
-                                                IdentifierName("RuntimeGuardInterface")),
-                                            IdentifierName("InitializeStaticField")))
-                                    .WithArgumentList(
-                                        ArgumentList(
-                                            SingletonSeparatedList<ArgumentSyntax>(
-                                                Argument(
-                                                    LiteralExpression(
-                                                        SyntaxKind.NumericLiteralExpression,
-                                                        Literal(gid)))))))))))
-                .WithModifiers(
-                    TokenList(
-                        new[]{
-                            Token(SyntaxKind.PublicKeyword),
-                            Token(SyntaxKind.StaticKeyword)}));
-
-            return CompilationUnit()
-                .WithMembers(
-                    SingletonList<MemberDeclarationSyntax>(
-                        ClassDeclaration(className)
-                        .WithModifiers(
-                            TokenList(
-                                new[]{
-                                    Token(SyntaxKind.PublicKeyword),
-                                    Token(SyntaxKind.StaticKeyword)}))
-                        .WithMembers(
-                            SingletonList<MemberDeclarationSyntax>(
-                                rgField))));
         }
     }
 }
