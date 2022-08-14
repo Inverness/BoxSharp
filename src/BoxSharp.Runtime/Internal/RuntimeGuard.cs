@@ -78,7 +78,7 @@ namespace BoxSharp.Runtime.Internal
         //     }
         // }
 
-        internal void CollectDisposable(IDisposable disposable)
+        internal void CollectDisposable(IDisposable? disposable)
         {
             if (disposable == null)
                 return;
@@ -185,8 +185,10 @@ namespace BoxSharp.Runtime.Internal
         internal void Stop()
         {
             _active = false;
+
             if (_disposables == null)
                 return;
+
             foreach (IDisposable disposable in _disposables)
             {
                 try
@@ -196,8 +198,16 @@ namespace BoxSharp.Runtime.Internal
                 }
                 catch
                 {
+                    // TODO Log any exceptions here
                 }
             }
+
+            _disposables.Clear();
+        }
+
+        internal void Interrupt()
+        {
+            _active = false;
         }
 
         public TimeSpan GetTimeUntilLimit()

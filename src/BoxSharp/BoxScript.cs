@@ -15,12 +15,14 @@ namespace BoxSharp
 
     // public delegate TRes BoxScriptFunc<TArg, TRes>(TArg arg);
 
-    public abstract class BoxScript
+    public abstract class BoxScript : IDisposable
     {
         // This value may be saved on a captured ExecutionContext, in which case
         // we may need to place the BoxScript reference within another class so that
         // the reference to it can be cleared if the script is disposed.
         private static readonly AsyncLocal<BoxScript?> s_current = new();
+
+        public abstract void Dispose();
 
         /// <summary>
         /// Gets or sets the current script. This is saved using <see cref="AsyncLocal{T}"/>.
@@ -103,7 +105,10 @@ namespace BoxSharp
             return arg => current.RunInContextAsync(() => new ValueTask<TRes>(func(arg))).GetAwaiter().GetResult();
         }
 
-        internal abstract ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func, object? globals = null);
+        internal abstract ValueTask<TRes> RunInContextAsync<TRes>(
+            Func<ValueTask<TRes>> func,
+            object? globals = null,
+            CancellationToken token = default);
     }
 
     public class BoxScript<T> : BoxScript
@@ -129,9 +134,6 @@ namespace BoxSharp
 
         public async Task<T> RunAsync(object? globals = null, CancellationToken token = default)
         {
-            if (_isDisposed)
-                throw new ObjectDisposedException(GetType().Name);
-
             T result = default!;
 
             await RunInContextAsync(async () => result = (T) await _entryPoint(), globals);
@@ -139,8 +141,16 @@ namespace BoxSharp
             return result;
         }
 
-        internal override async ValueTask<TRes> RunInContextAsync<TRes>(Func<ValueTask<TRes>> func, object? globals = null)
+        internal override async ValueTask<TRes> RunInContextAsync<TRes>(
+            Func<ValueTask<TRes>> func,
+            object? globals = null,
+            CancellationToken token = default)
         {
+            if (_isDisposed)
+                throw new ObjectDisposedException(GetType().Name);
+
+            token.ThrowIfCancellationRequested();
+
             if (!_isInitialized)
             {
                 // TODO Set the RuntimeGuard field in BoxCompiler?
@@ -160,8 +170,15 @@ namespace BoxSharp
                 _isInitialized = true;
             }
 
+            // If cancellation happens concurrently, Interrupt() will make the RuntimeGuard inactive
+            // and cause exceptions to be thrown. Stop() will eventually happen afterwards to have
+            // any resources cleaned up properly.
+            CancellationTokenRegistration reg =
+                token.CanBeCanceled ? token.Register(() => _runtimeGuard.Interrupt()) : default;
+
             BoxScript? oldCurrent = Current;
             Current = this;
+
             _runtimeGuard.Start();
             try
             {
@@ -170,17 +187,21 @@ namespace BoxSharp
             finally
             {
                 _runtimeGuard.Stop();
+
                 Current = oldCurrent;
+
+                reg.Dispose();
             }
         }
 
-        //public void Dispose()
-        //{
-        //    if (!_isDisposed)
-        //    {
-        //        //_gid.Dispose();
-        //        _isDisposed = true;
-        //    }
-        //}
+        public override void Dispose()
+        {
+            if (!_isDisposed)
+            {
+                _runtimeGuard.Interrupt();
+                // TODO AssemblyLoadContext.Unload()
+                _isDisposed = true;
+            }
+        }
     }
 }
