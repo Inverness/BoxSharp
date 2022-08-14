@@ -82,9 +82,7 @@ namespace BoxSharp.Tests
 
             var compiler = new BoxCompiler(ws, RuntimeGuardSettings.Default, scriptBaseDirectory: scriptFilesPath, isDebug: true);
 
-            using var stream = FileUtilities.OpenAsyncRead("ScriptFiles/HelloWorld.csx");
-
-            var result = await compiler.Compile<object>(stream, typeof(ScriptGlobals));
+            var result = await compiler.CompileFile<object>("ScriptFiles/HelloWorld.csx", typeof(ScriptGlobals));
 
             Assert.Equal(CompileStatus.Success, result.Status);
 

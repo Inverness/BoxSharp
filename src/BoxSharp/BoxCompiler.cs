@@ -63,24 +63,25 @@ namespace BoxSharp
             _isDebug = isDebug;
         }
 
-        public Task<ScriptCompileResult<T>> Compile<T>(string code, Type? globalsType = null)
+        public async Task<ScriptCompileResult<T>> CompileFile<T>(string path, Type? globalsType = null)
         {
-            return Compile<T>(SourceText.From(code), globalsType);
+            using FileStream stream = FileUtilities.OpenAsyncRead(path);
+
+            return await Compile<T>(SourceText.From(stream), globalsType, path);
         }
 
-        public Task<ScriptCompileResult<T>> Compile<T>(Stream code, Type? globalsType = null)
+        public Task<ScriptCompileResult<T>> Compile<T>(string code, Type? globalsType = null, string? path = null)
         {
-            return Compile<T>(SourceText.From(code), globalsType);
+            return Compile<T>(SourceText.From(code), globalsType, path);
         }
 
-        public async Task<ScriptCompileResult<T>> Compile<T>(SourceText code, Type? globalsType = null)
+        public async Task<ScriptCompileResult<T>> Compile<T>(SourceText code, Type? globalsType = null, string? path = null)
         {
             // Using the Roslyn Scripting API is not an option due to the fact that Compilation instances
             // created for scripting have limitations placed on them.
             // The most significant limitation is that syntax trees produced by a #load directive
             // cannot be replaced, which prevents injection of RuntimeGuard calls.
 
-            //GidReservation gid = RuntimeGuardInstances.Allocate(_runtimeGuardSettings);
             int gid = Interlocked.Increment(ref s_gidCounter);
 
             string assemblyName = "BoxScriptAssembly" + gid;
@@ -95,19 +96,22 @@ namespace BoxSharp
             // The #load directives are stripped out of the syntax trees so that they are not
             // processed by the Compilation instance for reasons described above.
 
-            var readyTrees = new List<SyntaxTree>();
-            var pendingTrees = new Stack<SyntaxTree>();
+            var readyTrees = new List<(SyntaxTree tree, string? path)>();
+            var pendingTrees = new Stack<(SyntaxTree tree, string? path)>();
             var pendingLoads = new Stack<LoadDirectiveTriviaSyntax>();
 
-            var mainTree = CSharpSyntaxTree.ParseText(code, parseOptions);
+            if (!string.IsNullOrEmpty(path))
+                path = Path.GetFullPath(path);
 
-            pendingTrees.Push(mainTree);
+            SyntaxTree mainTree = CSharpSyntaxTree.ParseText(code, parseOptions, path ?? "");
+
+            pendingTrees.Push((mainTree, path));
 
             while (pendingTrees.Count > 0)
             {
-                SyntaxTree oldTree = pendingTrees.Pop();
+                (SyntaxTree oldTree, string? sourceLoad) = pendingTrees.Pop();
 
-                (SyntaxTree newTeee, LoadDirectiveTriviaSyntax[] loadPaths) = await ExtractLoadDirectivesAsync(oldTree);
+                (SyntaxTree newTree, LoadDirectiveTriviaSyntax[] loadPaths) = await ExtractLoadDirectivesAsync(oldTree);
 
                 foreach (LoadDirectiveTriviaSyntax loadPath in loadPaths)
                 {
@@ -119,20 +123,20 @@ namespace BoxSharp
                     pendingLoads.Push(loadPath);
                 }
 
-                readyTrees.Add(newTeee);
+                readyTrees.Add((newTree, sourceLoad));
 
                 while (pendingLoads.Count > 0)
                 {
-                    LoadDirectiveTriviaSyntax loadPath = pendingLoads.Pop();
+                    LoadDirectiveTriviaSyntax load = pendingLoads.Pop();
 
-                    string loadPathText = loadPath.File.ValueText;
+                    string loadPath = load.File.ValueText;
 
                     // TODO: Cache loaded scripts, and also ensure their syntax trees are moved further back in the list
-                    string? resolvedLoad = _sourceReferenceResolver.ResolveReference(loadPathText, null);
+                    string? resolvedLoadPath = _sourceReferenceResolver.ResolveReference(loadPath, null);
 
-                    if (resolvedLoad == null)
+                    if (resolvedLoadPath == null)
                     {
-                        var diag = Diagnostic.Create(InvalidLoad, loadPath.GetLocation(), loadPathText);
+                        var diag = Diagnostic.Create(InvalidLoad, load.GetLocation(), loadPath);
 
                         diagnostics.Add(diag);
 
@@ -141,11 +145,23 @@ namespace BoxSharp
                         continue;
                     }
 
-                    using Stream loadedStream = _sourceReferenceResolver.OpenRead(resolvedLoad);
+                    // Check if the script was already loaded
+                    // TODO May need more complex dependency graph resolution for top level statement ordering
+                    if (readyTrees.Any(i => i.path == resolvedLoadPath))
+                        continue;
 
-                    SyntaxTree loadedTree = CSharpSyntaxTree.ParseText(SourceText.From(loadedStream), parseOptions);
+                    // Loading the same script twice in the same file isn't allowed
+                    // TODO diagnostic error for load specified twice
+                    if (pendingTrees.Any(i => i.path == resolvedLoadPath))
+                        continue;
+
+                    using Stream loadedStream = _sourceReferenceResolver.OpenRead(resolvedLoadPath);
+
+                    SyntaxTree loadedTree = CSharpSyntaxTree.ParseText(SourceText.From(loadedStream),
+                                                                       parseOptions,
+                                                                       resolvedLoadPath);
                         
-                    pendingTrees.Push(loadedTree);
+                    pendingTrees.Push((loadedTree, resolvedLoadPath));
                 }
             }
 
@@ -162,7 +178,7 @@ namespace BoxSharp
                                                               metadataReferenceResolver: _metadataReferenceResolver);
 
             var compilation = CSharpCompilation.Create(assemblyName,
-                                                       readyTrees,
+                                                       readyTrees.Select(i => i.tree),
                                                        _whitelistSettings.References,
                                                        compileOptions);
 
@@ -209,9 +225,9 @@ namespace BoxSharp
                     Debug.Assert(d.Severity == DiagnosticSeverity.Error);
 
                     diagnostics.Add(d);
-
-                    hasErrors = true;
                 }
+
+                hasErrors = true;
             }
 
             // If there were no errors so far, rewrite all syntax trees to include calls to RuntimeGuardInterface.
@@ -231,7 +247,7 @@ namespace BoxSharp
                 {
                     var oldRoot = (CompilationUnitSyntax) await oldTree.GetRootAsync();
 
-                    var newRoot = (CompilationUnitSyntax) rewriter.Rewrite(oldRoot);
+                    CompilationUnitSyntax newRoot = rewriter.Rewrite(oldRoot);
 
                     SyntaxTree newTree = oldTree.WithRootAndOptions(newRoot, oldTree.Options);
 
@@ -267,11 +283,9 @@ namespace BoxSharp
                 hasErrors = !emitResult.Success;
             }
 
-            CompileStatus status = hasErrors ? CompileStatus.Failed : CompileStatus.Success;
-
-            if (status == CompileStatus.Failed)
+            if (hasErrors)
             {
-                return new ScriptCompileResult<T>(status, diagnostics, null);
+                return new ScriptCompileResult<T>(CompileStatus.Failed, diagnostics, null);
             }
 
             Assembly assembly = Assembly.Load(asmMemoryStream.ToArray(), pdbMemoryStream.ToArray());
@@ -293,7 +307,7 @@ namespace BoxSharp
 
             var boxScript = new BoxScript<T>(rg, runner, runtimeGuardSetter, globalsSetter);
 
-            return new ScriptCompileResult<T>(status, diagnostics, boxScript);
+            return new ScriptCompileResult<T>(CompileStatus.Success, diagnostics, boxScript);
         }
 
         private static Func<Task<object>> GetScriptEntryPoint(Type scriptClassType)
@@ -317,21 +331,36 @@ namespace BoxSharp
             // Load directives are always part of the first token
             SyntaxToken firstToken = root.GetFirstToken(includeZeroWidth: true);
 
-            SyntaxTriviaList loadTriviaList = firstToken.LeadingTrivia.Where(t => t.IsKind(SyntaxKind.LoadDirectiveTrivia)).ToSyntaxTriviaList();
+            LoadDirectiveTriviaSyntax[] loadDirectives =
+                firstToken.LeadingTrivia.Where(t => t.IsKind(SyntaxKind.LoadDirectiveTrivia))
+                                        .Select(l => l.GetStructure())
+                                        .Cast<LoadDirectiveTriviaSyntax>()
+                                        .ToArray();
 
-            SyntaxTriviaList nonLoadTriviaList = firstToken.LeadingTrivia.Where(t => !t.IsKind(SyntaxKind.LoadDirectiveTrivia)).ToSyntaxTriviaList();
+            // Rebuild the leading trivia without the load directives. Must keep the same number of lines in the file
+            // to ensure that debugging works correctly.
+            SyntaxTriviaList newLeadingTrivia = SyntaxTriviaList.Empty;
 
-            SyntaxToken newFirstToken = firstToken.WithLeadingTrivia(nonLoadTriviaList);
+            foreach (SyntaxTrivia trivia in firstToken.LeadingTrivia)
+            {
+                if (trivia.IsKind(SyntaxKind.LoadDirectiveTrivia))
+                {
+                    // TODO match the existing type of line endings
+                    newLeadingTrivia = newLeadingTrivia.Add(SyntaxFactory.CarriageReturnLineFeed);
+                }
+                else
+                {
+                    newLeadingTrivia = newLeadingTrivia.Add(trivia);
+                }
+            }
+
+            SyntaxToken newFirstToken = firstToken.WithLeadingTrivia(newLeadingTrivia);
 
             CompilationUnitSyntax newRoot = root.ReplaceToken(firstToken, newFirstToken);
 
             SyntaxTree newTree = tree.WithRootAndOptions(newRoot, tree.Options);
 
-            LoadDirectiveTriviaSyntax[] loadFiles = loadTriviaList.Select(l => l.GetStructure())
-                                                                  .Cast<LoadDirectiveTriviaSyntax>()
-                                                                  .ToArray();
-
-            return (newTree, loadFiles);
+            return (newTree, loadDirectives);
         }
 
         private class BoxMetadataReferenceResolver : MetadataReferenceResolver
