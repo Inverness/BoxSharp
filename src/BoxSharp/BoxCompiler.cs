@@ -124,7 +124,7 @@ namespace BoxSharp
                     string loadPath = load.File.ValueText;
 
                     // TODO: Cache loaded scripts, and also ensure their syntax trees are moved further back in the list
-                    string? resolvedLoadPath = _sourceReferenceResolver.ResolveReference(loadPath, null);
+                    string? resolvedLoadPath = _sourceReferenceResolver.ResolveReference(loadPath, sourceLoad);
 
                     if (resolvedLoadPath == null)
                     {
@@ -167,7 +167,8 @@ namespace BoxSharp
                                                               scriptClassName: scriptClassName,
                                                               optimizationLevel: optLevel,
                                                               allowUnsafe: false,
-                                                              metadataReferenceResolver: _metadataReferenceResolver);
+                                                              metadataReferenceResolver: _metadataReferenceResolver,
+                                                              nullableContextOptions: NullableContextOptions.Enable);
 
             var compilation = CSharpCompilation.Create(assemblyName,
                                                        readyTrees.Select(i => i.tree),

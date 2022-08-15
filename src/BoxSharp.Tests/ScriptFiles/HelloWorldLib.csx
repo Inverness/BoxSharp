@@ -1,6 +1,6 @@
 ﻿#load ".meta/globals.csx"
 
-public static void WriteHeaderLine(string text)
+public static void WriteHeaderLine(string? text)
 {
     if (string.IsNullOrEmpty(text))
         return;

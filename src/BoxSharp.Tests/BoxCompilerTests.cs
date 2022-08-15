@@ -26,8 +26,6 @@ namespace BoxSharp.Tests
             ws.AddSymbol(typeof(ScriptGlobals), true);
             ws.AddSymbol(typeof(Console), true);
 
-            ws.AddSdkReference("netstandard");
-            ws.AddSdkReference("System.Runtime");
             ws.AddReferenceByType(typeof(BoxCompilerTests));
             ws.AddReferenceByType(typeof(Console));
 
@@ -53,8 +51,6 @@ namespace BoxSharp.Tests
 
             ws.AddSymbol(typeof(ScriptGlobals), true);
 
-            ws.AddSdkReference("netstandard");
-            ws.AddSdkReference("System.Runtime");
             ws.AddReferenceByType(typeof(BoxCompilerTests));
 
             var box = new BoxCompiler(ws, RuntimeGuardSettings.Default);
@@ -73,8 +69,6 @@ namespace BoxSharp.Tests
             ws.AddSymbol(typeof(Console), true);
             ws.AddSymbol(typeof(string), true);
 
-            ws.AddSdkReference("netstandard");
-            ws.AddSdkReference("System.Runtime");
             ws.AddReferenceByType(typeof(BoxCompilerTests));
             ws.AddReferenceByType(typeof(Console));
 

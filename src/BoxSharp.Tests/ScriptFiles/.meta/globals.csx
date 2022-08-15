@@ -1,6 +1,8 @@
 ﻿// This file contains global symbols that are used for code completion by IDE's.
 // At runtime, any #load directives referencing the .meta folder are ignored
 
+#nullable enable
+
 /// <summary>
 /// Writes a line to the standard output.
 /// </summary>

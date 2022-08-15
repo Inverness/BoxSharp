@@ -25,6 +25,8 @@ namespace BoxSharp
 
             AddReferenceByType(typeof(object));
             AddReferenceByType(typeof(RuntimeGuardInterface));
+            AddSdkReference("System.Runtime");
+            AddSdkReference("netstandard");
         }
 
         public WhitelistSettings(WhitelistSettings other)
@@ -46,9 +48,21 @@ namespace BoxSharp
         {
             string sdkDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
 
+            AddDirReference(sdkDir, name);
+        }
+
+        public void AddAppReference(string name)
+        {
+            string appDir = Path.GetDirectoryName(typeof(BoxCompiler).Assembly.Location);
+
+            AddDirReference(appDir, name);
+        }
+
+        private void AddDirReference(string dir, string name)
+        {
             string asmFileName = name + ".dll";
 
-            string asmPath = Path.Combine(sdkDir, asmFileName);
+            string asmPath = Path.Combine(dir, asmFileName);
 
             PortableExecutableReference asmRef = MetadataReference.CreateFromFile(asmPath);
 
@@ -61,7 +75,7 @@ namespace BoxSharp
 
             PortableExecutableReference mr = MetadataReference.CreateFromFile(location);
 
-            _references.Add(mr);
+            AddReference(mr);
         }
 
         public void AddSymbol(WhitelistSymbol entry)
