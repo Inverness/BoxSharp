@@ -130,7 +130,11 @@ namespace BoxSharp
 
                     List<SyntaxNode> args = method.Parameters.Select(p => sg.Argument(p.RefKind, sg.IdentifierName(p.Name))).ToList();
 
-                    SyntaxNode methodAccess = sg.MemberAccessExpression(globalsAccess, method.Name);
+                    SyntaxNode methodName = method.IsGenericMethod ?
+                        sg.GenericName(method.Name, method.TypeArguments) :
+                        sg.IdentifierName(method.Name);
+
+                    SyntaxNode methodAccess = sg.MemberAccessExpression(globalsAccess, methodName);
 
                     SyntaxNode invokeMethod = sg.InvocationExpression(methodAccess, args);
 
