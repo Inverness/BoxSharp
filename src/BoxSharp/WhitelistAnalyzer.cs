@@ -14,14 +14,6 @@ namespace BoxSharp
     /// </summary>
     internal class WhitelistAnalyzer
     {
-        internal static readonly DiagnosticDescriptor IllegalSymbolDescriptor = new(
-            "BOX001",
-            "Illegal symbol",
-            "Symbol is not whitelisted: {0}",
-            "BoxSharp",
-            DiagnosticSeverity.Error,
-            true);
-
         private readonly WhitelistSettings _settings;
 
         public WhitelistAnalyzer(WhitelistSettings settings)
@@ -68,7 +60,7 @@ namespace BoxSharp
 
             var results = new List<(ISymbol, Diagnostic)>();
 
-            SyntaxNode root = await syntaxTree.GetRootAsync();
+            SyntaxNode root = await syntaxTree.GetRootAsync().ConfigureAwait(false);
 
             foreach (SyntaxNode node in syntaxTree.GetRoot().DescendantNodesAndSelf())
             {
@@ -90,8 +82,8 @@ namespace BoxSharp
                     var decId = DocumentationCommentId.CreateDeclarationId(s);
 
                     Diagnostic diag = s.Locations.Length == 1
-                        ? Diagnostic.Create(IllegalSymbolDescriptor, s.Locations[0], messageArgs: decId)
-                        : Diagnostic.Create(IllegalSymbolDescriptor, null, s.Locations, messageArgs: decId);
+                        ? Diagnostic.Create(BoxDiagnostics.IllegalSymbol, s.Locations[0], messageArgs: decId)
+                        : Diagnostic.Create(BoxDiagnostics.IllegalSymbol, null, s.Locations, messageArgs: decId);
 
                     results.Add((s, diag));
                 }

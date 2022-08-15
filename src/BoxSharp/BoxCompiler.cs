@@ -23,14 +23,6 @@ namespace BoxSharp
     /// </summary>
     public class BoxCompiler
     {
-        private static readonly DiagnosticDescriptor InvalidLoad =
-            new DiagnosticDescriptor("BOX002",
-                                     "Invalid load directive",
-                                     "Invalid load directive: {0}",
-                                     "BoxSharp",
-                                     DiagnosticSeverity.Error,
-                                     true);
-
         private static int s_gidCounter;
 
         private readonly WhitelistSettings _whitelistSettings;
@@ -136,7 +128,7 @@ namespace BoxSharp
 
                     if (resolvedLoadPath == null)
                     {
-                        var diag = Diagnostic.Create(InvalidLoad, load.GetLocation(), loadPath);
+                        var diag = Diagnostic.Create(BoxDiagnostics.InvalidLoad, load.GetLocation(), loadPath);
 
                         diagnostics.Add(diag);
 
@@ -236,7 +228,7 @@ namespace BoxSharp
             {
                 // Generate a class that will hold the static RuntimeGuard instance used in the rest of the code
                 // The field will be initialized using the previously allocated GID.
-                var scg = new ScriptClassGenerator(gid, compilation, scriptClassName, globalsType);
+                var scg = new ScriptClassGenerator(compilation, scriptClassName, globalsType);
 
                 SyntaxTree genSyntaxTree = scg.Generate();
 

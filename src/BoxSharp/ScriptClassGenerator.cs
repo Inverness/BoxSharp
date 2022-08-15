@@ -12,25 +12,21 @@ using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 namespace BoxSharp
 {
     /// <summary>
-    /// Generates the "_BoxScriptGenerated#" class for each script.
-    /// 
-    /// Currently this contains the static RuntimeGuard instance field that is initialized and used by RuntimeGuardInterface.
+    /// Generates code required by scripts.
     /// </summary>
     internal class ScriptClassGenerator
     {
         internal static readonly string RuntimeGuardFieldName = BoxSyntaxFactory.MakeSpecialName("RuntimeGuard");
         internal static readonly string GlobalsFieldName = BoxSyntaxFactory.MakeSpecialName("Globals");
 
-        private readonly int _gid;
         private readonly Compilation _compilation;
         private readonly string _scriptClassName;
         private readonly Type? _globalsType;
 
-        internal ScriptClassGenerator(int gid, Compilation compilation, string scriptClassName, Type? globalsType)
+        internal ScriptClassGenerator(Compilation compilation, string scriptClassName, Type? globalsType)
         {
             Debug.Assert(globalsType == null || globalsType.IsClass || globalsType.IsInterface);
 
-            _gid = gid;
             _compilation = compilation;
             _scriptClassName = scriptClassName;
             _globalsType = globalsType;
@@ -60,11 +56,21 @@ namespace BoxSharp
             return CSharpSyntaxTree.Create(cu, new CSharpParseOptions(kind: SourceCodeKind.Script));
         }
 
+        /// <summary>
+        /// Generate expression syntax that provides global access to the RuntimeGuard instance.
+        /// </summary>
+        /// <returns></returns>
         internal ExpressionSyntax GetRuntimeGuardFieldExpression()
         {
             return BoxSyntaxFactory.GlobalMemberAccess(_scriptClassName, RuntimeGuardFieldName);
         }
 
+        /// <summary>
+        /// Generates a public static field that will hold the RuntimeGuard instance for the script.
+        /// It is given a special name that can't be referenced from code.
+        /// </summary>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
         private FieldDeclarationSyntax GenerateRuntimeGuardField()
         {
             SyntaxGenerator sg = BoxSyntaxFactory.SyntaxGenerator;
@@ -84,6 +90,12 @@ namespace BoxSharp
             return (FieldDeclarationSyntax) field;
         }
 
+        /// <summary>
+        /// Generates a public static field that will hold the instance of the globals class for the script.
+        /// It is given a special name that can't be referenced from code.
+        /// </summary>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
         private FieldDeclarationSyntax GenerateGlobalsField()
         {
             Debug.Assert(_globalsType != null);
@@ -106,7 +118,8 @@ namespace BoxSharp
         /// <summary>
         /// Examines the globals type to find members that can have declarations added as a global statement.
         /// 
-        /// A
+        /// This allows public instance methods or properties of the globals type to be accessed globally from
+        /// script code.
         /// </summary>
         /// <returns></returns>
         private MemberDeclarationSyntax[] GenerateGlobalMembers()

@@ -13,7 +13,8 @@ namespace BoxSharp
         public static async Task<IList<WhitelistSymbol>> LoadAsync(string path)
         {
             using FileStream stream = FileUtilities.OpenAsyncRead(path);
-            return await LoadAsync(stream);
+
+            return await LoadAsync(stream).ConfigureAwait(false);
         }
 
         public static async Task<IList<WhitelistSymbol>> LoadAsync(Stream stream)
