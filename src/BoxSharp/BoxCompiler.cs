@@ -82,84 +82,14 @@ namespace BoxSharp
             var diagnostics = new List<Diagnostic>();
             bool hasErrors = false;
 
-            var parseOptions = new CSharpParseOptions(kind: SourceCodeKind.Script);
+            (IList<SyntaxTree> loadedTrees, IList<Diagnostic> loadDiagnostics) = await ParseSyntaxTreesAsync(code, path);
 
-            // Recursive load the main syntax tree and any files required by a #load directive.
-            // The #load directives are stripped out of the syntax trees so that they are not
-            // processed by the Compilation instance for reasons described above.
-
-            var readyTrees = new List<(SyntaxTree tree, string? path)>();
-            var pendingTrees = new Stack<(SyntaxTree tree, string? path)>();
-            var pendingLoads = new Stack<LoadDirectiveTriviaSyntax>();
-
-            if (!string.IsNullOrEmpty(path))
-                path = Path.GetFullPath(path);
-
-            SyntaxTree mainTree = CSharpSyntaxTree.ParseText(code, parseOptions, path ?? "");
-
-            pendingTrees.Push((mainTree, path));
-
-            while (pendingTrees.Count > 0)
+            if (loadDiagnostics.Count > 0)
             {
-                (SyntaxTree oldTree, string? sourceLoad) = pendingTrees.Pop();
+                diagnostics.AddRange(loadDiagnostics);
 
-                (SyntaxTree newTree, LoadDirectiveTriviaSyntax[] loadPaths) = await ExtractLoadDirectivesAsync(oldTree);
-
-                foreach (LoadDirectiveTriviaSyntax loadPath in loadPaths)
-                {
-                    // Meta files are used for code completion when editing scripts, so
-                    // they should not be loaded at runtime.
-                    if (loadPath.File.ValueText.StartsWith(".meta/"))
-                        continue;
-
-                    pendingLoads.Push(loadPath);
-                }
-
-                readyTrees.Add((newTree, sourceLoad));
-
-                while (pendingLoads.Count > 0)
-                {
-                    LoadDirectiveTriviaSyntax load = pendingLoads.Pop();
-
-                    string loadPath = load.File.ValueText;
-
-                    // TODO: Cache loaded scripts, and also ensure their syntax trees are moved further back in the list
-                    string? resolvedLoadPath = _sourceReferenceResolver.ResolveReference(loadPath, sourceLoad);
-
-                    if (resolvedLoadPath == null)
-                    {
-                        var diag = Diagnostic.Create(BoxDiagnostics.InvalidLoad, load.GetLocation(), loadPath);
-
-                        diagnostics.Add(diag);
-
-                        hasErrors = true;
-
-                        continue;
-                    }
-
-                    // Check if the script was already loaded
-                    // TODO May need more complex dependency graph resolution for top level statement ordering
-                    if (readyTrees.Any(i => i.path == resolvedLoadPath))
-                        continue;
-
-                    // Loading the same script twice in the same file isn't allowed
-                    // TODO diagnostic error for load specified twice
-                    if (pendingTrees.Any(i => i.path == resolvedLoadPath))
-                        continue;
-
-                    using Stream loadedStream = _sourceReferenceResolver.OpenRead(resolvedLoadPath);
-
-                    SyntaxTree loadedTree = CSharpSyntaxTree.ParseText(SourceText.From(loadedStream),
-                                                                       parseOptions,
-                                                                       resolvedLoadPath);
-                        
-                    pendingTrees.Push((loadedTree, resolvedLoadPath));
-                }
+                hasErrors |= loadDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error);
             }
-
-            // The order of syntax trees affects the order that top level script statements are executed.
-            // We want scripts loaded last to execute first since other scripts might depend on them.
-            readyTrees.Reverse();
 
             OptimizationLevel optLevel = _isDebug ? OptimizationLevel.Debug : OptimizationLevel.Release;
 
@@ -170,8 +100,12 @@ namespace BoxSharp
                                                               metadataReferenceResolver: _metadataReferenceResolver,
                                                               nullableContextOptions: NullableContextOptions.Enable);
 
+            // Top level script statements execute in the same order of the syntax tree list.
+            // We want scripts loaded last to execute first since other scripts might depend on them, so
+            // the loaded trees list is reversed.
+
             var compilation = CSharpCompilation.Create(assemblyName,
-                                                       readyTrees.Select(i => i.tree),
+                                                       loadedTrees.Reverse(),
                                                        _whitelistSettings.References,
                                                        compileOptions);
 
@@ -182,24 +116,9 @@ namespace BoxSharp
 
             foreach (SyntaxTree tree in compilation.SyntaxTrees)
             {
-                SyntaxNode root = await tree.GetRootAsync();
+                ISet<ISymbol> symbols = await GetDeclaredSymbolsAsync(compilation, tree);
 
-                foreach (SyntaxNode node in root.DescendantNodesAndSelf())
-                {
-                    SemanticModel? semanticModel = null;
-
-                    if (node is not MemberDeclarationSyntax && node is not VariableDeclaratorSyntax)
-                        continue;
-
-                    semanticModel ??= compilation.GetSemanticModel(tree);
-
-                    ISymbol? symbol = semanticModel.GetDeclaredSymbol(node);
-
-                    if (symbol != null)
-                    {
-                        declaredSymbols.Add(symbol);
-                    }
-                }
+                declaredSymbols.UnionWith(symbols);
             }
 
             // Analyze all syntax trees with the whitelist analyzer.
@@ -227,8 +146,10 @@ namespace BoxSharp
 
             if (!hasErrors)
             {
-                // Generate a class that will hold the static RuntimeGuard instance used in the rest of the code
-                // The field will be initialized using the previously allocated GID.
+                // Generate code that will hold the static RuntimeGuard instance used used by the
+                // runtime guard rewriter.
+                // This will also generate a field to hold the globals type instance, and
+                // generate any global members from the globals type instance.
                 var scg = new ScriptClassGenerator(compilation, scriptClassName, globalsType);
 
                 SyntaxTree genSyntaxTree = scg.Generate();
@@ -303,6 +224,125 @@ namespace BoxSharp
             return new ScriptCompileResult<T>(CompileStatus.Success, diagnostics, boxScript);
         }
 
+        /// <summary>
+        /// Recursively parse the main script syntax tree and any other script syntax trees specified
+        /// by load directives. Any load directives found will be stripped from the syntax trees
+        /// after being processed.
+        /// </summary>
+        /// <param name="mainCode">The main code</param>
+        /// <param name="mainPath">The path to the main code</param>
+        /// <returns>A list of syntax trees in order of load</returns>
+        private async Task<(IList<SyntaxTree>, IList<Diagnostic>)> ParseSyntaxTreesAsync(SourceText mainCode, string? mainPath)
+        {
+            var parseOptions = new CSharpParseOptions(kind: SourceCodeKind.Script);
+
+            var diagnostics = new List<Diagnostic>();
+            var readyTrees = new List<(SyntaxTree tree, string? path)>();
+            var pendingTrees = new Stack<(SyntaxTree tree, string? path)>();
+            var pendingLoads = new Stack<LoadDirectiveTriviaSyntax>();
+
+            if (!string.IsNullOrEmpty(mainPath))
+                mainPath = Path.GetFullPath(mainPath);
+
+            SyntaxTree mainTree = CSharpSyntaxTree.ParseText(mainCode, parseOptions, mainPath ?? "");
+
+            pendingTrees.Push((mainTree, mainPath));
+
+            while (pendingTrees.Count > 0)
+            {
+                (SyntaxTree oldTree, string? sourcePath) = pendingTrees.Pop();
+
+                (SyntaxTree newTree, IList<LoadDirectiveTriviaSyntax> loadPaths) = await ExtractLoadDirectivesAsync(oldTree);
+
+                foreach (LoadDirectiveTriviaSyntax loadPath in loadPaths)
+                {
+                    // Meta files are used for code completion when editing scripts, so
+                    // they should not be loaded at runtime.
+                    if (loadPath.File.ValueText.StartsWith(".meta/"))
+                        continue;
+
+                    pendingLoads.Push(loadPath);
+                }
+
+                readyTrees.Add((newTree, sourcePath));
+
+                while (pendingLoads.Count > 0)
+                {
+                    LoadDirectiveTriviaSyntax load = pendingLoads.Pop();
+
+                    string loadPath = load.File.ValueText;
+
+                    string? resolvedLoadPath = _sourceReferenceResolver.ResolveReference(loadPath, sourcePath);
+
+                    if (resolvedLoadPath == null)
+                    {
+                        var diag = Diagnostic.Create(BoxDiagnostics.InvalidLoad, load.GetLocation(), loadPath);
+
+                        diagnostics.Add(diag);
+
+                        continue;
+                    }
+
+                    // Check if the script was already loaded
+                    // TODO May need more complex dependency graph resolution for top level statement ordering
+                    if (readyTrees.Any(i => i.path == resolvedLoadPath))
+                        continue;
+
+                    // Loading the same script twice in the same file isn't allowed
+                    if (pendingTrees.Any(i => i.path == resolvedLoadPath))
+                    {
+                        var diag = Diagnostic.Create(BoxDiagnostics.DuplicateLoad, load.GetLocation(), loadPath);
+
+                        diagnostics.Add(diag);
+
+                        continue;
+                    }
+
+                    using Stream loadedStream = _sourceReferenceResolver.OpenRead(resolvedLoadPath);
+
+                    SyntaxTree loadedTree = CSharpSyntaxTree.ParseText(SourceText.From(loadedStream),
+                                                                       parseOptions,
+                                                                       resolvedLoadPath);
+
+                    pendingTrees.Push((loadedTree, resolvedLoadPath));
+                }
+            }
+
+            return (readyTrees.Select(i => i.tree).ToList(), diagnostics);
+        }
+
+        /// <summary>
+        /// Gets a set of all symbols declared in the syntax tree.
+        /// </summary>
+        /// <param name="compilation">The tree's compilation unit</param>
+        /// <param name="tree">A syntax tree</param>
+        /// <returns>A set of all declared symbols</returns>
+        private static async Task<ISet<ISymbol>> GetDeclaredSymbolsAsync(Compilation compilation, SyntaxTree tree)
+        {
+            var declaredSymbols = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+
+            SyntaxNode root = await tree.GetRootAsync();
+
+            SemanticModel? semanticModel = null;
+
+            foreach (SyntaxNode node in root.DescendantNodesAndSelf())
+            {
+                if (node is not MemberDeclarationSyntax && node is not VariableDeclaratorSyntax)
+                    continue;
+
+                semanticModel ??= compilation.GetSemanticModel(tree);
+
+                ISymbol? symbol = semanticModel.GetDeclaredSymbol(node);
+
+                if (symbol != null)
+                {
+                    declaredSymbols.Add(symbol);
+                }
+            }
+
+            return declaredSymbols;
+        }
+
         private static Func<Task<object>> GetScriptEntryPoint(Type scriptClassType)
         {
             MethodInfo? entryPointMethod = scriptClassType.GetMethod("\u003CInitialize\u003E", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -317,12 +357,15 @@ namespace BoxSharp
             return entryPointDelegate;
         }
 
-        private static async Task<(SyntaxTree, LoadDirectiveTriviaSyntax[])> ExtractLoadDirectivesAsync(SyntaxTree tree)
+        private static async Task<(SyntaxTree, IList<LoadDirectiveTriviaSyntax>)> ExtractLoadDirectivesAsync(SyntaxTree tree)
         {
             var root = (CompilationUnitSyntax) await tree.GetRootAsync();
 
             // Load directives are always part of the first token
             SyntaxToken firstToken = root.GetFirstToken(includeZeroWidth: true);
+
+            if (!firstToken.LeadingTrivia.Any(t => t.IsKind(SyntaxKind.LoadDirectiveTrivia)))
+                return (tree, Array.Empty<LoadDirectiveTriviaSyntax>());
 
             LoadDirectiveTriviaSyntax[] loadDirectives =
                 firstToken.LeadingTrivia.Where(t => t.IsKind(SyntaxKind.LoadDirectiveTrivia))
