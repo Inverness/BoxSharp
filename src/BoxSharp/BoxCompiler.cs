@@ -23,6 +23,9 @@ namespace BoxSharp
     /// </summary>
     public class BoxCompiler
     {
+        private const string MetaDirName = ".meta";
+        private static readonly string MetaDirPart = Path.DirectorySeparatorChar + MetaDirName + Path.DirectorySeparatorChar;
+
         private static int s_gidCounter;
 
         private readonly WhitelistSettings _whitelistSettings;
@@ -142,18 +145,18 @@ namespace BoxSharp
                 hasErrors = true;
             }
 
-            // If there were no errors so far, rewrite all syntax trees to include calls to RuntimeGuardInterface.
+            // Generate code that will hold the static RuntimeGuard instance used used by the
+            // runtime guard rewriter.
+            // This will also generate a field to hold the globals type instance, and
+            // generate any global members from the globals type instance.
+            // We do this even if there are errors because it will cause additional misleading errors otherwise.
+            var scg = new ScriptClassGenerator(compilation, scriptClassName, globalsType);
 
+            SyntaxTree genSyntaxTree = scg.Generate();
+
+            // If there were no errors so far, rewrite all syntax trees to include calls to RuntimeGuardInterface.
             if (!hasErrors)
             {
-                // Generate code that will hold the static RuntimeGuard instance used used by the
-                // runtime guard rewriter.
-                // This will also generate a field to hold the globals type instance, and
-                // generate any global members from the globals type instance.
-                var scg = new ScriptClassGenerator(compilation, scriptClassName, globalsType);
-
-                SyntaxTree genSyntaxTree = scg.Generate();
-
                 // TODO Consider using OperationWalker instead
                 var rewriter = new RuntimeGuardRewriter(scg.GetRuntimeGuardFieldExpression());
 
@@ -167,9 +170,9 @@ namespace BoxSharp
 
                     compilation = compilation.ReplaceSyntaxTree(oldTree, newTree);
                 }
-
-                compilation = compilation.AddSyntaxTrees(genSyntaxTree);
             }
+
+            compilation = compilation.AddSyntaxTrees(genSyntaxTree);
 
             // Force the full compilation and check all errors
 
@@ -239,7 +242,6 @@ namespace BoxSharp
             var diagnostics = new List<Diagnostic>();
             var readyTrees = new List<(SyntaxTree tree, string? path)>();
             var pendingTrees = new Stack<(SyntaxTree tree, string? path)>();
-            var pendingLoads = new Stack<LoadDirectiveTriviaSyntax>();
 
             if (!string.IsNullOrEmpty(mainPath))
                 mainPath = Path.GetFullPath(mainPath);
@@ -254,22 +256,10 @@ namespace BoxSharp
 
                 (SyntaxTree newTree, IList<LoadDirectiveTriviaSyntax> loadPaths) = await ExtractLoadDirectivesAsync(oldTree);
 
-                foreach (LoadDirectiveTriviaSyntax loadPath in loadPaths)
-                {
-                    // Meta files are used for code completion when editing scripts, so
-                    // they should not be loaded at runtime.
-                    if (loadPath.File.ValueText.StartsWith(".meta/"))
-                        continue;
-
-                    pendingLoads.Push(loadPath);
-                }
-
                 readyTrees.Add((newTree, sourcePath));
 
-                while (pendingLoads.Count > 0)
+                foreach (LoadDirectiveTriviaSyntax load in loadPaths)
                 {
-                    LoadDirectiveTriviaSyntax load = pendingLoads.Pop();
-
                     string loadPath = load.File.ValueText;
 
                     string? resolvedLoadPath = _sourceReferenceResolver.ResolveReference(loadPath, sourcePath);
@@ -282,6 +272,11 @@ namespace BoxSharp
 
                         continue;
                     }
+
+                    // Meta files are used for code completion when editing scripts, so
+                    // they should not be loaded at runtime.
+                    if (resolvedLoadPath.IndexOf(MetaDirPart, StringComparison.OrdinalIgnoreCase) >= 0)
+                        continue;
 
                     // Check if the script was already loaded
                     // TODO May need more complex dependency graph resolution for top level statement ordering
@@ -448,7 +443,7 @@ namespace BoxSharp
 
             public override Stream OpenRead(string resolvedPath)
             {
-                if (resolvedPath.StartsWith(".meta/"))
+                if (resolvedPath.IndexOf(MetaDirPart, StringComparison.OrdinalIgnoreCase) >= 0)
                     throw new ArgumentException("Attempted to open meta script: " + resolvedPath);
 
                 return base.OpenRead(resolvedPath);
@@ -456,8 +451,8 @@ namespace BoxSharp
 
             public override string? ResolveReference(string path, string? baseFilePath)
             {
-                if (path.StartsWith(".meta/"))
-                    throw new ArgumentException("Attempted to resolve meta script: " + path);
+                //if (path.StartsWith(".meta/"))
+                //    throw new ArgumentException("Attempted to resolve meta script: " + path);
 
                 return base.ResolveReference(path, baseFilePath);
             }

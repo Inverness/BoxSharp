@@ -76,7 +76,7 @@ namespace BoxSharp.Tests
 
             var compiler = new BoxCompiler(ws, RuntimeGuardSettings.Default, scriptBaseDirectory: scriptFilesPath, isDebug: true);
 
-            var result = await compiler.CompileFile<object>("ScriptFiles/HelloWorld.csx", typeof(ScriptGlobals));
+            var result = await compiler.CompileFile<object>("ScriptFiles/HelloWorld/HelloWorld.csx", typeof(ScriptGlobals));
 
             Assert.Equal(CompileStatus.Success, result.Status);
 

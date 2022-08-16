@@ -29,7 +29,9 @@
     <None Update="ScriptFiles\**\*.csx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="ScriptFiles\.meta\*.csx" />
+    <None Include="ScriptFiles\**\.meta\*.csx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
