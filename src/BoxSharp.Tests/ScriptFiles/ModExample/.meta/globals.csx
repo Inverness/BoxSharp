@@ -3,6 +3,8 @@
 
 #nullable enable
 
+#r "System.ComponentModel"
+
 using System;
 using System.Collections.Generic;
 
@@ -55,6 +57,7 @@ public struct ConsoleEventArgs
     public ConsoleEventArgs(string command)
     {
         Command = command;
+        IsHandled = false;
     }
 
     public string Command { get; }

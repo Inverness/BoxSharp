@@ -1,5 +1,7 @@
 ﻿#load ".meta/globals.csx"
 
+#nullable enable
+
 public static void WriteHeaderLine(string? text)
 {
     if (string.IsNullOrEmpty(text))
