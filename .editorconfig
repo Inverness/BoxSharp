@@ -10,12 +10,15 @@ root = true
 insert_final_newline = true
 indent_style = space
 indent_size = 4
+guidelines = 80
 
 [project.json]
 indent_size = 2
 
 # C# files
-[*.cs]
+[*.{cs,csx}]
+guidelines = 120
+
 # New line preferences
 csharp_new_line_before_open_brace = all
 csharp_new_line_before_else = true
@@ -68,16 +71,6 @@ dotnet_naming_symbols.static_fields.required_modifiers = static
 dotnet_naming_style.static_prefix_style.required_prefix = s_
 dotnet_naming_style.static_prefix_style.capitalization = camel_case 
 
-# dotnet_naming_rule.thread_fields_should_have_prefix.severity = suggestion
-# dotnet_naming_rule.thread_fields_should_have_prefix.symbols  = thread_fields
-# dotnet_naming_rule.thread_fields_should_have_prefix.style    = thread_prefix_style
-
-# dotnet_naming_symbols.thread_fields.applicable_kinds   = field
-# dotnet_naming_symbols.thread_fields.required_modifiers = static
-
-dotnet_naming_style.thread_prefix_style.required_prefix = t_
-dotnet_naming_style.thread_prefix_style.capitalization = camel_case 
-
 # internal and private fields should be _camelCase
 dotnet_naming_rule.camel_case_for_private_internal_fields.severity = suggestion
 dotnet_naming_rule.camel_case_for_private_internal_fields.symbols  = private_internal_fields
@@ -119,7 +112,7 @@ csharp_style_throw_expression = true:suggestion
 csharp_style_conditional_delegate_call = true:suggestion
 
 # Space preferences
-csharp_space_after_cast = false
+csharp_space_after_cast = true
 csharp_space_after_colon_in_inheritance_clause = true
 csharp_space_after_comma = true
 csharp_space_after_dot = false
